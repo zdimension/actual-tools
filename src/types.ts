@@ -15,7 +15,7 @@ export type AccountMapping = Record<string, string>;
 export interface ActualConfig {
   url: string;
   password: string;
-  sync_id: string;
+  syncId: string;
 }
 
 /**

@@ -29,7 +29,7 @@ export class ActualClient {
         dataDir: './actual-cache',
       });
 
-      await api.downloadBudget(this.config.sync_id);
+      await api.downloadBudget(this.config.syncId);
       
       this.initialized = true;
       console.log('✓ Connected to Actual Budget');

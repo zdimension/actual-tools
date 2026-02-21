@@ -22,7 +22,7 @@ Edit `config.json`:
   "actual": {
     "url": "https://your-actual-server.com",
     "password": "your-actual-password",
-    "sync_id": "your-budget-sync-id"
+    "syncId": "your-budget-sync-id"
   },
   "connectors": {
     "bankin": {
