@@ -13,8 +13,22 @@ export type AccountMapping = Record<string, string>;
  * Actual server configuration
  */
 export interface ActualConfig {
+  /**
+   * Actual Budget server URL
+   * @default ""
+   */
   url: string;
+
+  /**
+   * Actual Budget server password
+   * @default ""
+   */
   password: string;
+
+  /**
+   * Actual Budget sync ID (UUID)
+   * @default ""
+   */
   syncId: string;
 }
 
@@ -22,11 +36,31 @@ export interface ActualConfig {
  * Base configuration structure for any connector
  */
 export interface ConnectorConfig {
+  /**
+   * Maps vendor account IDs to Actual account IDs
+   */
   accountMapping?: AccountMapping;
-  startCutoff?: string; // YYYY-MM-DD - connector-specific cutoff, overrides global
-  disabled?: string | boolean; // truthy disables connector; value is reason (e.g., "2fa")
-  requiresManualRun?: boolean; // if true, connector only runs when explicitly specified with -c flag
-  lastSuccessfulRun?: string | null; // ISO timestamp of last successful run (null if never run)
+
+  /**
+   * Connector-specific transaction start date (YYYY-MM-DD), overrides global
+   */
+  startCutoff?: string;
+
+  /**
+   * Disables connector; can be boolean or reason string (e.g., "2fa")
+   */
+  disabled?: string | boolean;
+
+  /**
+   * If true, connector only runs when explicitly specified with -c flag
+   */
+  requiresManualRun?: boolean;
+
+  /**
+   * ISO timestamp of last successful run
+   */
+  lastSuccessfulRun?: string | null;
+
   [key: string]: any; // Additional connector-specific fields
 }
 
@@ -78,11 +112,40 @@ export interface FetchTransactionsResult {
  * Root configuration structure
  */
 export interface RootConfig {
+  /**
+   * Client ID for Bankin API authentication
+   * @default ""
+   */
   clientId?: string;
+
+  /**
+   * Client secret for Bankin API authentication
+   * @default ""
+   */
   clientSecret?: string;
-  startCutoff?: string; // YYYY-MM-DD - only import transactions on or after this date
-  balanceCategory?: string; // Category ID for balance update operations
+
+  /**
+   * Default start date for transaction import (YYYY-MM-DD) or 'latest'
+   * @default ""
+   */
+  startCutoff?: string;
+
+  /**
+   * Category ID for balance update operations
+   * @default ""
+   */
+  balanceCategory?: string;
+
+  /**
+   * Actual Budget server configuration
+   * @default {}
+   */
   actual: ActualConfig;
+
+  /**
+   * Connector configurations
+   * @default {}
+   */
   connectors: {
     [connectorName: string]: ConnectorConfig;
   };

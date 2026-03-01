@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { Connector } from '../connector.interface.js';
 import { FetchTransactionsResult, VendorAccount, VendorTransaction } from '../../../../types.js';
-import { MyEdenredConfig } from './types.js';
+import { Config } from './types.js';
 
 const API_ROOT = 'https://user.eu.edenred.io/v1/users';
 
@@ -261,7 +261,14 @@ export class MyEdenredConnector implements Connector {
     return bearer;
   }
 
-  async fetchTransactions(config: MyEdenredConfig, dataPath: string): Promise<FetchTransactionsResult> {
+  async fetchTransactions(config: Config, dataPath: string): Promise<FetchTransactionsResult> {
+    if (!config.login?.trim()) {
+      throw new Error('MyEdenred connector requires a non-empty login');
+    }
+    if (!config.password?.trim()) {
+      throw new Error('MyEdenred connector requires a non-empty password');
+    }
+
     console.log('→ Getting client credentials...');
     const clientTokens = await this.getClientTokens();
 

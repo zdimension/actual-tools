@@ -1,6 +1,8 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import Ajv from 'ajv';
 import { RootConfig, AccountMapping, ConnectorConfig } from './types.js';
+import { SchemaProvider } from './schema-provider.js';
 
 /**
  * Manages reading and writing the configuration file
@@ -14,14 +16,61 @@ export class ConfigManager {
   }
 
   /**
-   * Load configuration from disk
+   * Load configuration from disk, creating with defaults if missing
    */
   async load(): Promise<void> {
+    let data: string;
+    let fileExists = true;
+
     try {
-      const data = await fs.readFile(this.configPath, 'utf-8');
+      data = await fs.readFile(this.configPath, 'utf-8');
+    } catch (error: any) {
+      if (error.code === 'ENOENT') {
+        // File doesn't exist, create empty object
+        console.log('ℹ Config file not found, creating with defaults...');
+        fileExists = false;
+        data = '{}';
+      } else {
+        throw new Error(`Failed to read config from ${this.configPath}: ${error}`);
+      }
+    }
+
+    try {
       this.config = JSON.parse(data);
     } catch (error) {
-      throw new Error(`Failed to load config from ${this.configPath}: ${error}`);
+      throw new Error(`Failed to parse config JSON: ${error}`);
+    }
+
+    // Validate and apply defaults using AJV
+    await this.validateAndApplyDefaults();
+
+    // Save if file was created
+    if (!fileExists) {
+      await this.save();
+      console.log('✓ Created config.json with default values');
+    }
+  }
+
+  /**
+   * Validate configuration and apply defaults using AJV
+   */
+  private async validateAndApplyDefaults(): Promise<void> {
+    if (!this.config) {
+      this.config = {} as RootConfig;
+    }
+
+    try {
+      const schema = SchemaProvider.getSchema();
+      const ajv = new Ajv({ useDefaults: true, strict: false });
+      const validate = ajv.compile(schema);
+
+      const valid = validate(this.config);
+      if (!valid) {
+        const errors = validate.errors?.map(e => `${e.instancePath}: ${e.message}`).join('\n');
+        console.warn(`⚠ Config validation warnings:\n${errors}`);
+      }
+    } catch (error) {
+      console.warn(`⚠ Could not validate config: ${error}`);
     }
   }
 
@@ -172,5 +221,88 @@ export class ConfigManager {
     const mapping = this.getAccountMapping(connectorName);
     const value = mapping[vendorId];
     return value && !value.startsWith('**') ? value : null;
+  }
+
+  /**
+   * Register a new connector with default values from connector-specific schema
+   * Creates a connector entry if it doesn't exist
+   */
+  async registerConnectorWithDefaults(connectorName: string): Promise<void> {
+    if (!this.config) {
+      throw new Error('Configuration not loaded. Call load() first.');
+    }
+
+    // Ensure connectors object exists
+    if (!this.config.connectors) {
+      this.config.connectors = {};
+    }
+
+    // Don't overwrite an existing connector
+    if (this.config.connectors[connectorName]) {
+      return;
+    }
+
+    // Get connector-specific schema and apply defaults
+    try {
+      const schema = SchemaProvider.getConnectorSchema(connectorName);
+
+      const ajv = new Ajv({ useDefaults: true, strict: false });
+      const validate = ajv.compile(schema);
+
+      // Start with empty object, validation with useDefaults will fill in all defaults
+      const defaultConfig: ConnectorConfig = {};
+      validate(defaultConfig);
+
+      // Add the connector with defaults
+      this.config.connectors[connectorName] = defaultConfig;
+      await this.save();
+
+      console.log(
+        `Created config entry for connector '${connectorName}'. ` +
+        `Please configure it in config.json with your credentials and account mappings.`,
+      );
+    } catch (error) {
+      console.error(`Failed to register connector '${connectorName}':`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Validate and fill missing fields for an existing connector entry
+   * Does not save automatically - call save() if modifications were made
+   * Returns { errors: array or null if valid, modified: boolean }
+   */
+  validateAndFillConnectorDefaults(connectorName: string): { errors: any[] | null; modified: boolean } {
+    if (!this.config) {
+      throw new Error('Configuration not loaded. Call load() first.');
+    }
+
+    if (!this.config.connectors?.[connectorName]) {
+      return { errors: [{ message: 'Connector not found in configuration' }], modified: false };
+    }
+
+    try {
+      const schema = SchemaProvider.getConnectorSchema(connectorName);
+      const ajv = new Ajv({ useDefaults: true, strict: false });
+      const validate = ajv.compile(schema);
+
+      // Deep clone the config to compare before and after
+      const configBefore = JSON.stringify(this.config.connectors[connectorName]);
+      
+      // Validate and fill missing fields
+      const valid = validate(this.config.connectors[connectorName]);
+      
+      // Compare to detect if defaults were added
+      const configAfter = JSON.stringify(this.config.connectors[connectorName]);
+      const modified = configBefore !== configAfter;
+
+      return { 
+        errors: valid ? null : (validate.errors || [{ message: 'Unknown validation error' }]), 
+        modified 
+      };
+    } catch (error) {
+      console.warn(`⚠ Could not validate connector '${connectorName}':`, error);
+      return { errors: [{ message: `Validation exception: ${error}` }], modified: false };
+    }
   }
 }

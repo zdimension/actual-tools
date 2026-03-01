@@ -1,4 +1,6 @@
+import * as fs from 'fs/promises';
 import * as path from 'path';
+import { fileURLToPath } from 'url';
 import { utils } from '@actual-app/api';
 import { BaseCommand } from '../base-command.js';
 import { ConfigManager } from '../../config-manager.js';
@@ -68,6 +70,71 @@ export class BankSyncCommand extends BaseCommand {
   private async run(configManager: ConfigManager, actualClient: ActualClient, config: RootConfig, dryRun: boolean = false, connectorFilter: string[] | null = null): Promise<void> {
     if (dryRun) {
       console.log('🔍 DRY RUN MODE - No changes will be made to Actual\n');
+    }
+
+    // Register any missing connectors that were explicitly selected with -c
+    if (connectorFilter && connectorFilter.length > 0) {
+      for (const connectorName of connectorFilter) {
+        // Check if connector is known
+        if (!(await this.isKnownConnector(connectorName))) {
+          const knownConnectors = await this.getKnownConnectors();
+          console.error(`✗ Unknown connector: ${connectorName}`);
+          console.error(`Available connectors: ${knownConnectors.join(', ')}`);
+          await actualClient.shutdown();
+          process.exit(1);
+        }
+
+        // Register if missing (manual mode only)
+        if (!config.connectors[connectorName]) {
+          await configManager.registerConnectorWithDefaults(connectorName);
+          // Reload config to reflect the newly added connector
+          await configManager.load();
+          const updatedConfig = configManager.getConfig();
+          config.connectors = updatedConfig.connectors;
+          console.log(`✓ Created config entry for connector "${connectorName}"`);
+        }
+      }
+    }
+
+    // Validate and fill missing fields for all existing connector entries
+    let configModified = false;
+    const validationErrors: Map<string, any[]> = new Map();
+    
+    for (const connectorName of Object.keys(config.connectors)) {
+      const { errors, modified } = configManager.validateAndFillConnectorDefaults(connectorName);
+      
+      if (errors) {
+        validationErrors.set(connectorName, errors);
+      }
+      
+      if (modified) {
+        configModified = true;
+      }
+    }
+
+    // Handle validation errors
+    if (validationErrors.size > 0) {
+      console.error('\n✗ Configuration validation failed for connectors:');
+      for (const [name, errors] of validationErrors.entries()) {
+        console.error(`\n  ${name}:`);
+        for (const error of errors) {
+          const path = error.instancePath || error.dataPath || '';
+          const message = error.message || 'Unknown error';
+          console.error(`    - ${path ? path + ': ' : ''}${message}`);
+        }
+      }
+      console.error('\nPlease fix the configuration errors in config.json');
+      await actualClient.shutdown();
+      process.exit(1);
+    }
+
+    // Handle configuration modifications
+    if (configModified) {
+      await configManager.save();
+      console.error('\n✗ Configuration was modified with default values.');
+      console.error('Please review and update config.json with correct values before running bank-sync again.');
+      await actualClient.shutdown();
+      process.exit(1);
     }
 
     // Filter connectors if specified
@@ -461,5 +528,32 @@ export class BankSyncCommand extends BaseCommand {
       console.log(`  ⚠ Could not handle balance update: ${error}`);
       return null;
     }
+  }
+
+  /**
+   * Get list of all known connector names
+   */
+  private async getKnownConnectors(): Promise<string[]> {
+    try {
+      const currentFile = fileURLToPath(import.meta.url);
+      const connectorsDir = path.join(path.dirname(currentFile), 'connectors');
+      const entries = await fs.readdir(connectorsDir, { withFileTypes: true });
+      const dirNames = entries
+        .filter(entry => entry.isDirectory())
+        .map(entry => entry.name)
+        .sort();
+      return dirNames;
+    } catch (error) {
+      console.error('Failed to read connectors directory:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Check if a connector name is known
+   */
+  private async isKnownConnector(name: string): Promise<boolean> {
+    const knownConnectors = await this.getKnownConnectors();
+    return knownConnectors.includes(name.toLowerCase());
   }
 }

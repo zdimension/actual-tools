@@ -8,7 +8,7 @@ import {
   VendorAccount,
   VendorTransaction,
 } from '../../../../types.js';
-import { BankinConfig } from './types.js';
+import { Config } from './types.js';
 
 interface BankinDeviceData {
   bankinDeviceId?: string;
@@ -90,9 +90,16 @@ export class BankinConnector implements Connector {
    * Main entry point for fetching transactions
    */
   async fetchTransactions(
-    config: BankinConfig,
+    config: Config,
     dataPath: string
   ): Promise<FetchTransactionsResult> {
+    if (!config.email?.trim()) {
+      throw new Error('Bankin connector requires a non-empty email');
+    }
+    if (!config.password?.trim()) {
+      throw new Error('Bankin connector requires a non-empty password');
+    }
+
     this.email = config.email;
     this.password = config.password;
 
@@ -146,11 +153,11 @@ export class BankinConnector implements Connector {
   private async generateDeviceId(): Promise<void> {
     try {
       const response = await this.axios.post('/v2/devices', {
-        os: 'web',
-        version: '1.0.0',
-        width: 1920,
-        height: 1080,
-        model: 'web',
+        os: 'android',
+        version: '36',
+        width: 1080,
+        height: 2179,
+        model: 'googlepixel7pro',
         has_fingerprint: false,
       }, {
         params: {
@@ -176,22 +183,17 @@ export class BankinConnector implements Connector {
       const csrfToken = createHash('md5')
         .update(`${this.email}${this.bankinDeviceId}`)
         .digest('base64');
-      console.log(JSON.stringify({
-        email: this.email,
-        password: this.password,
-        token: '',
-      }));
       const response = await this.axios.post('/v2/authenticate', {
         email: this.email,
         password: this.password,
-        token: '',
       }, {
         headers: {
-          'client-id': this.clientId,
-          'client-secret': this.clientSecret,
+          'Client-Id': this.clientId,
+          'Client-Secret': this.clientSecret,
           'Bankin-Version': this.bankinVersion,
           'Bankin-Device': this.bankinDeviceId,
-          'Csrf': csrfToken,
+          'User-Agent': 'AndroidUserAgent-4.65.2-381-prod-Android_36-GooglePixel7Pro_1080_2340-standard-fr-',
+          //'Csrf': csrfToken,
           'content-type': 'application/json;charset=UTF-8'
         },
       });

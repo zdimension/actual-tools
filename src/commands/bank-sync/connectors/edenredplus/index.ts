@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { Connector } from '../connector.interface.js';
 import { FetchTransactionsResult, VendorAccount, VendorTransaction } from '../../../../types.js';
-import { EdenredPlusConfig } from './types.js';
+import { Config } from './types.js';
 
 const API_ROOT = 'https://prd.smarter.edenred.io/bff-user-api/v1';
 
@@ -227,7 +227,14 @@ export class EdenredPlusConnector implements Connector {
     return bearerToken;
   }
 
-  async fetchTransactions(config: EdenredPlusConfig, dataPath: string): Promise<FetchTransactionsResult> {
+  async fetchTransactions(config: Config, dataPath: string): Promise<FetchTransactionsResult> {
+    if (!config.login?.trim()) {
+      throw new Error('EdenredPlus connector requires a non-empty login');
+    }
+    if (!config.password?.trim()) {
+      throw new Error('EdenredPlus connector requires a non-empty password');
+    }
+
     console.log('→ Authenticating with EdenredPlus...');
     const token = await this.getToken(config.login, config.password, dataPath);
 

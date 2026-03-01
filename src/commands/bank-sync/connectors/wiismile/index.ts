@@ -5,7 +5,7 @@ import {
   VendorAccount,
   VendorTransaction,
 } from '../../../../types.js';
-import { WiiSmileConfig } from './types.js';
+import { Config } from './types.js';
 
 interface RawCard {
   id: string;
@@ -30,9 +30,16 @@ const WALLET_URL = `${API_ROOT}/beneficiary/wallets/`;
 
 export class WiiSmileConnector implements Connector {
   async fetchTransactions(
-    config: WiiSmileConfig,
+    config: Config,
     dataPath: string
   ): Promise<FetchTransactionsResult> {
+    if (!config.login?.trim()) {
+      throw new Error('WiiSmile connector requires a non-empty login');
+    }
+    if (!config.password?.trim()) {
+      throw new Error('WiiSmile connector requires a non-empty password');
+    }
+
     const [phpsessid, datadome] = await this.getToken(config.login, config.password, dataPath);
     const cards = await this.getWiiSmileData(config.login, phpsessid, datadome);
 

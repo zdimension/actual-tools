@@ -1,6 +1,15 @@
 import { ConnectorConfig } from '../../../../types.js';
 
-export interface AmundiConfig extends ConnectorConfig {
+/**
+ * Amundi-specific configuration
+ */
+export interface Config extends ConnectorConfig {
+  /**
+   * @default ""
+   */
   login: string;
+  /**
+   * @default ""
+   */
   password: string;
 }

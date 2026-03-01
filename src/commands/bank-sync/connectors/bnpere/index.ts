@@ -5,7 +5,7 @@ import {
   VendorAccount,
   VendorTransaction,
 } from '../../../../types.js';
-import { BNPEREConfig } from './types.js';
+import { Config } from './types.js';
 
 interface RawPlan {
   planID: string;
@@ -31,9 +31,16 @@ const WALLET_URL = `${BASE_URL}/accueil`;
 
 export class BNPEREConnector implements Connector {
   async fetchTransactions(
-    config: BNPEREConfig,
+    config: Config,
     dataPath: string
   ): Promise<FetchTransactionsResult> {
+    if (!config.login?.trim()) {
+      throw new Error('BNPERE connector requires a non-empty login');
+    }
+    if (!config.password?.trim()) {
+      throw new Error('BNPERE connector requires a non-empty password');
+    }
+
     const token = await this.getToken(config.login, config.password, dataPath);
     const [plans, operations] = await this.getBNPEREData(config.login, token);
 

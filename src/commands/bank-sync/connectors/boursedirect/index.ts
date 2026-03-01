@@ -12,7 +12,7 @@ import {
   VendorAccount,
   VendorTransaction,
 } from '../../../../types.js';
-import { BourseDirectConfig } from './types.js';
+import { Config } from './types.js';
 
 const BASE_URL = 'https://www.boursedirect.fr/fr';
 const LOGIN_URL = `${BASE_URL}/login`;
@@ -36,9 +36,16 @@ interface RawOperation {
 
 export class BourseDirectConnector implements Connector {
   async fetchTransactions(
-    config: BourseDirectConfig,
+    config: Config,
     dataPath: string
   ): Promise<FetchTransactionsResult> {
+    if (!config.login?.trim()) {
+      throw new Error('BourseDirect connector requires a non-empty login');
+    }
+    if (!config.password?.trim()) {
+      throw new Error('BourseDirect connector requires a non-empty password');
+    }
+
     const token = await this.getToken(config, dataPath);
     const [rawAccounts, rawOps] = await this.getBourseDirectData(token);
 
@@ -55,12 +62,12 @@ export class BourseDirectConnector implements Connector {
     };
   }
 
-  private async getToken(config: BourseDirectConfig, dataPath: string): Promise<string> {
+  private async getToken(config: Config, dataPath: string): Promise<string> {
     const userDataDir = path.join(dataPath, config.login);
     await fs.mkdir(userDataDir, { recursive: true });
 
     const context = await chromium.launchPersistentContext(userDataDir, {
-      headless: true,
+      headless: false,
     });
 
     const page = await context.newPage();
@@ -114,17 +121,18 @@ export class BourseDirectConnector implements Connector {
               const otpCode = this.generateOTPFromUrl(config.otpUrl);
               console.log(`Generated OTP code: ${otpCode}`);
               
-              // Check trusted radio
-              await page.locator('#trusted').check();
+              // Check trusted checkbox if present
+              try {
+                await page.locator('#trusted').check({ timeout: 1000 });
+              } catch {
+                // Checkbox not present, continue
+              }
               
               // Type the six digits into the code inputs
               const codeInputs = await page.locator('.code-input > input').all();
               for (let i = 0; i < otpCode.length && i < codeInputs.length; i++) {
                 await codeInputs[i].fill(otpCode[i]);
               }
-              
-              // DEBUG: Wait for user input before submitting
-              await this.pause('Press Enter to submit 2FA code...');
               
               // Click submit button
               await page.locator('#2FA-modal .buttons .primary').click();

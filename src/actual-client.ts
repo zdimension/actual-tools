@@ -22,6 +22,26 @@ export class ActualClient {
       return;
     }
 
+    // Validate required configuration
+    const errors: string[] = [];
+    if (!this.config.url?.trim()) {
+      errors.push('actual.url is required and cannot be empty');
+    }
+    if (!this.config.password?.trim()) {
+      errors.push('actual.password is required and cannot be empty');
+    }
+    if (!this.config.syncId?.trim()) {
+      errors.push('actual.syncId is required and cannot be empty');
+    }
+
+    if (errors.length > 0) {
+      console.error('✗ Invalid Actual Budget configuration:');
+      for (const error of errors) {
+        console.error(`  - ${error}`);
+      }
+      throw new Error('Cannot connect to Actual Budget: missing required configuration');
+    }
+
     try {
       await api.init({
         serverURL: this.config.url,
