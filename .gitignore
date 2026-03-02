@@ -32,3 +32,6 @@ old-code
 old_code
 
 actual-cache
+
+src/scratch/*
+!src/scratch/example.ts

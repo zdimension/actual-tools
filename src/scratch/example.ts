@@ -1,12 +1,14 @@
-export default async function run(ctx) {
-  const { q, runQuery } = ctx.api;
+import { ScratchContext } from "../scratch-context";
 
-  const { data } = await runQuery(
+export default async function run(ctx: ScratchContext) {
+  const { q, aqlQuery } = ctx.api;
+
+  const { data } = (await aqlQuery(
     q('transactions')
       .filter({ date: { $gte: '2026-01-01' } })
       .select(['id', 'date', 'amount', 'payee.name'])
       .limit(10)
-  );
+  )) as any;
 
   console.log('First 10 transactions in 2026:');
   for (const row of data) {
