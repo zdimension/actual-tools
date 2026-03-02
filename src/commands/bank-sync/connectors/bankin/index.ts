@@ -91,7 +91,8 @@ export class BankinConnector implements Connector {
    */
   async fetchTransactions(
     config: Config,
-    dataPath: string
+    dataPath: string,
+    isManuallyRun?: boolean
   ): Promise<FetchTransactionsResult> {
     if (!config.email?.trim()) {
       throw new Error('Bankin connector requires a non-empty email');

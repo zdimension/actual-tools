@@ -257,7 +257,7 @@ export class AmundiConnector implements Connector {
     });
   }
 
-  async fetchTransactions(config: Config, dataPath: string): Promise<FetchTransactionsResult> {
+  async fetchTransactions(config: Config, dataPath: string, isManuallyRun?: boolean): Promise<FetchTransactionsResult> {
     if (!config.login?.trim()) {
       throw new Error('Amundi connector requires a non-empty login');
     }

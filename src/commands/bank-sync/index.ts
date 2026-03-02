@@ -21,11 +21,12 @@ export class BankSyncCommand extends BaseCommand {
     return 'Sync bank transactions from connectors to Actual Budget';
   }
 
-  private parseArgs(args: string[]): { dryRun: boolean; connectors: string[] | null, summary: boolean } {
+  private parseArgs(args: string[]): { dryRun: boolean; connectors: string[] | null; summary: boolean; allManual: boolean } {
     const result = {
       dryRun: false,
       connectors: null as string[] | null,
       summary: false,
+      allManual: false,
     };
 
     for (let i = 0; i < args.length; i++) {
@@ -41,6 +42,8 @@ export class BankSyncCommand extends BaseCommand {
         }
       } else if (arg === '--summary' || arg === '-s') {
         result.summary = true;
+      } else if (arg === '--all-manual' || arg === '-m') {
+        result.allManual = true;
       }
     }
 
@@ -48,12 +51,18 @@ export class BankSyncCommand extends BaseCommand {
   }
 
   async executeWithClients(configManager: ConfigManager, actualClient: ActualClient, config: RootConfig, args: string[]): Promise<void> {
-    const { dryRun, connectors, summary } = this.parseArgs(args);
+    const { dryRun, connectors, summary, allManual } = this.parseArgs(args);
+
+    if (allManual && connectors && connectors.length > 0) {
+      console.error('✗ Cannot use --all-manual (-m) together with --connectors (-c).');
+      process.exit(1);
+    }
+
     if (summary) {
       await this.runSummary(config);
       return;
     }
-    await this.run(configManager, actualClient, config, dryRun, connectors);
+    await this.run(configManager, actualClient, config, dryRun, connectors, allManual);
   }
 
   private async runSummary(config: RootConfig): Promise<void> {
@@ -67,7 +76,7 @@ export class BankSyncCommand extends BaseCommand {
   }
 
 
-  private async run(configManager: ConfigManager, actualClient: ActualClient, config: RootConfig, dryRun: boolean = false, connectorFilter: string[] | null = null): Promise<void> {
+  private async run(configManager: ConfigManager, actualClient: ActualClient, config: RootConfig, dryRun: boolean = false, connectorFilter: string[] | null = null, allManual: boolean = false): Promise<void> {
     if (dryRun) {
       console.log('🔍 DRY RUN MODE - No changes will be made to Actual\n');
     }
@@ -148,6 +157,14 @@ export class BankSyncCommand extends BaseCommand {
           process.exit(1);
         }
         console.log(`ℹ Running only selected connectors: ${connectorsToProcess.map(([name]) => name).join(', ')}\n`);
+      } else if (allManual) {
+        connectorsToProcess = connectorsToProcess.filter(([, connectorConfig]) => connectorConfig.requiresManualRun);
+        if (connectorsToProcess.length === 0) {
+          console.error('✗ No connectors are marked as manual (requiresManualRun: true).');
+          await actualClient.shutdown();
+          process.exit(1);
+        }
+        console.log(`ℹ Running all manual connectors: ${connectorsToProcess.map(([name]) => name).join(', ')}\n`);
       }
 
       // Process each connector
@@ -162,12 +179,15 @@ export class BankSyncCommand extends BaseCommand {
         }
 
         // Skip connectors requiring manual run unless explicitly selected
-        if (connectorConfig.requiresManualRun && !connectorFilter) {
+        if (connectorConfig.requiresManualRun && !connectorFilter && !allManual) {
           console.log(`⚠ Skipping connector ${connectorName} (requires manual run - use -c ${connectorName} to run)`);
           continue;
         }
 
         try {
+          // Determine if this is a manual run (via -c or -m flags)
+          const isManuallyRun = !!(connectorFilter || allManual);
+          
           await this.processConnector(
             connectorName,
             connectorConfig,
@@ -177,7 +197,8 @@ export class BankSyncCommand extends BaseCommand {
             config.clientSecret || '',
             config,
             config.startCutoff,
-            dryRun
+            dryRun,
+            isManuallyRun
           );
           
           // Update last successful run timestamp (only if not a dry run)
@@ -215,7 +236,8 @@ export class BankSyncCommand extends BaseCommand {
     clientSecret: string,
     config: RootConfig,
     startCutoff?: string,
-    dryRun: boolean = false
+    dryRun: boolean = false,
+    isManuallyRun: boolean = false
   ): Promise<void> {
     // Get the appropriate connector
     const connector = this.getConnector(connectorName, clientId, clientSecret);
@@ -228,7 +250,7 @@ export class BankSyncCommand extends BaseCommand {
     const dataPath = path.join(process.cwd(), 'data', connectorName);
 
     // Fetch data from connector
-    const result = await connector.fetchTransactions(connectorConfig, dataPath);
+    const result = await connector.fetchTransactions(connectorConfig, dataPath, isManuallyRun);
 
     // Filter transactions by date if startCutoff is specified
     // Connector-specific startCutoff overrides global startCutoff

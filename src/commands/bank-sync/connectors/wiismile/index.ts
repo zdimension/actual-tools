@@ -1,5 +1,7 @@
-import { chromium } from 'playwright';
+//import { chromium } from 'playwright';
+import { chromium } from 'patchright';
 import { Connector } from '../connector.interface.js';
+import { TwoFactorRequiredError } from '../two-factor-error.js';
 import {
   FetchTransactionsResult,
   VendorAccount,
@@ -26,12 +28,14 @@ interface RawOperation {
 }
 
 const API_ROOT = 'https://monentreprise.wiismile.fr';
+const LOGIN_URL = `${API_ROOT}/wii_start`;
 const WALLET_URL = `${API_ROOT}/beneficiary/wallets/`;
 
 export class WiiSmileConnector implements Connector {
   async fetchTransactions(
     config: Config,
-    dataPath: string
+    dataPath: string,
+    isManuallyRun: boolean = false
   ): Promise<FetchTransactionsResult> {
     if (!config.login?.trim()) {
       throw new Error('WiiSmile connector requires a non-empty login');
@@ -40,7 +44,7 @@ export class WiiSmileConnector implements Connector {
       throw new Error('WiiSmile connector requires a non-empty password');
     }
 
-    const [phpsessid, datadome] = await this.getToken(config.login, config.password, dataPath);
+    const [phpsessid, datadome] = await this.getToken(config.login, config.password, dataPath, isManuallyRun);
     const cards = await this.getWiiSmileData(config.login, phpsessid, datadome);
 
     const accounts = this.parseAccounts(cards);
@@ -52,29 +56,62 @@ export class WiiSmileConnector implements Connector {
     };
   }
 
-  private async getToken(login: string, password: string, dataPath: string): Promise<[string, string]> {
+  private async getToken(login: string, password: string, dataPath: string, isManuallyRun: boolean = false): Promise<[string, string]> {
     const userDataDir = `${dataPath}/${login}`;
     
     const context = await chromium.launchPersistentContext(userDataDir, {
-      headless: false,
+      headless: true,
       viewport: null,
-      args: ['--disable-blink-features=AutomationControlled'],
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.7103.25 Safari/537.36',
-      executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+      channel: "chrome"
+      // args: ['--disable-blink-features=AutomationControlled'],
+      // userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.7103.25 Safari/537.36',
+      // executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
     });
 
     const page = await context.newPage();
 
     try {
       await page.goto(WALLET_URL, { waitUntil: 'domcontentloaded' });
-      await page.waitForTimeout(1000000);
+      await page.waitForTimeout(1000);
 
       // Check if already logged in
       try {
         await page.waitForURL(WALLET_URL, { timeout: 4000 });
       } catch {
+        const bodyText = await page.textContent('body');
+        if (bodyText?.includes('Verification Required')) {
+          if (isManuallyRun) {
+            // Manual run: wait patiently for user to solve captcha
+            console.log('⚠ Verification required detected. Please solve the captcha in the browser...');
+            console.log('  Waiting for you to complete verification and reach the login page...');
+            await page.waitForURL(LOGIN_URL, { timeout: 600000 }); // Wait up to 10 minutes
+            
+            // Try to get cookies again after user solves captcha
+            const newCookies = await context.cookies();
+            const newPhpsessid = newCookies.find(c => c.name === 'PHPSESSID')?.value || '';
+            const newDatadome = newCookies.find(c => c.name === 'datadome')?.value || '';
+            
+            if (newPhpsessid && newDatadome) {
+              console.log('✓ Verification completed successfully!');
+              await context.close();
+              return [newPhpsessid, newDatadome];
+            }
+          } else {
+            // Automatic run: throw error to disable connector
+            const error = new TwoFactorRequiredError('Verification Required');
+            error.reason = 'captcha';
+            throw error;
+          }
+        }
+
         // Not logged in, need to authenticate
         console.log('Not logged in, logging in...');
+
+        // Check if we're on the login page, if not navigate there
+        if (!page.url().includes('/wii_start')) {
+          await page.goto(LOGIN_URL, { waitUntil: 'domcontentloaded' });
+          await page.waitForTimeout(1000);
+        }
         
         // Fill in credentials
         await page.waitForSelector('form', { timeout: 1000 });
@@ -82,6 +119,9 @@ export class WiiSmileConnector implements Connector {
         await page.waitForTimeout(500);
         await page.locator('input[name="password"]').fill(password);
         await page.waitForTimeout(1000);
+
+        // Submit the form with action="/wii_start"
+        await page.locator('form[action="/wii_start"]').evaluate((form: any) => form.submit());
 
         // Wait for successful login by checking URL change
         await page.waitForURL(WALLET_URL, { timeout: 400000 });
@@ -123,7 +163,7 @@ export class WiiSmileConnector implements Connector {
       .map(op => ({
         vendorId: op.id,
         vendorAccountId: op.card.id,
-        date: op.date,
+        date: op.date.split('T')[0],
         amount: op.amount,
         label: op.label,
         originalLabel: op.label,

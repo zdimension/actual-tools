@@ -118,6 +118,14 @@ export class EdenredPlusConnector implements Connector {
     // Wait for redirections to complete
     await page.waitForTimeout(3000);
 
+    // If page body contains "Une erreur", then go to home again
+    const bodyContent = await page.content();
+    if (bodyContent.includes('Une erreur')) {
+      console.log('  ⚠ Detected error page, retrying navigation...');
+      await page.goto('https://user.edenredplus.com/#/home');
+      await page.waitForTimeout(3000);
+    }
+
     // Check if we're on the login page
     if (page.url().includes('sso.eu.edenred.io/web/session/step/password')) {
       console.log('  → Login required, filling credentials...');
@@ -227,7 +235,7 @@ export class EdenredPlusConnector implements Connector {
     return bearerToken;
   }
 
-  async fetchTransactions(config: Config, dataPath: string): Promise<FetchTransactionsResult> {
+  async fetchTransactions(config: Config, dataPath: string, isManuallyRun?: boolean): Promise<FetchTransactionsResult> {
     if (!config.login?.trim()) {
       throw new Error('EdenredPlus connector requires a non-empty login');
     }
@@ -276,10 +284,15 @@ export class EdenredPlusConnector implements Connector {
     const transactionsData = await api.getTransactions();
 
     // Parse transactions
-    const transactions: VendorTransaction[] = transactionsData.map((tx) => {
+    const transactions: VendorTransaction[] = transactionsData.flatMap((tx) => {
       // Validate transaction type
       if (tx.type !== 'REDEMPTION' && tx.type !== 'TOPUP') {
         throw new Error(`Unsupported transaction type: ${tx.type}`);
+      }
+
+      // Skip blocked transactions
+      if (tx.resultDetail === 'ACCEPTANCE_PROFILE_BLOCKED') {
+        return [];
       }
 
       // Validate result
@@ -306,14 +319,14 @@ export class EdenredPlusConnector implements Connector {
         ? `${tx.name} - ${addressParts.join(', ')}`
         : tx.name;
 
-      return {
+      return [{
         vendorId: tx.transactionId,
         vendorAccountId: '1',
         amount: amount,
         date: tx.datetime.split('T')[0],
         label: payee,
         originalLabel: payee,
-      };
+      }];
     });
 
     console.log(`  ✓ Found ${1} account and ${transactions.length} transaction(s)`);

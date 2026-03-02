@@ -32,7 +32,8 @@ const WALLET_URL = `${BASE_URL}/accueil`;
 export class BNPEREConnector implements Connector {
   async fetchTransactions(
     config: Config,
-    dataPath: string
+    dataPath: string,
+    isManuallyRun?: boolean
   ): Promise<FetchTransactionsResult> {
     if (!config.login?.trim()) {
       throw new Error('BNPERE connector requires a non-empty login');

@@ -261,7 +261,7 @@ export class MyEdenredConnector implements Connector {
     return bearer;
   }
 
-  async fetchTransactions(config: Config, dataPath: string): Promise<FetchTransactionsResult> {
+  async fetchTransactions(config: Config, dataPath: string, isManuallyRun?: boolean): Promise<FetchTransactionsResult> {
     if (!config.login?.trim()) {
       throw new Error('MyEdenred connector requires a non-empty login');
     }

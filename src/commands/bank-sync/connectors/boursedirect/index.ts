@@ -37,7 +37,8 @@ interface RawOperation {
 export class BourseDirectConnector implements Connector {
   async fetchTransactions(
     config: Config,
-    dataPath: string
+    dataPath: string,
+    isManuallyRun?: boolean
   ): Promise<FetchTransactionsResult> {
     if (!config.login?.trim()) {
       throw new Error('BourseDirect connector requires a non-empty login');
