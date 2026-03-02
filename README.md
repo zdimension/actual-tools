@@ -48,6 +48,38 @@ Edit `config.json`:
 npm start -- the-command --arg1 val1
 ```
 
+### Scratch scripts (ActualQL / custom code)
+
+You can run any JS/TS script file directly through the app runtime:
+
+```bash
+npm start -- src/scratch/thing1.js
+```
+
+This will:
+- load `config.json`
+- initialize Actual API + budget
+- dynamically import and run your script
+- shutdown Actual cleanly afterwards
+
+Script module contract:
+- export a default async function `(ctx) => { ... }`, or
+- export named `run` async function
+
+The `ctx` object includes:
+- `actualClient` (wrapper used by built-in commands)
+- `api` from `@actual-app/api` (includes `q`, `runQuery`, etc.)
+- `utils` from `@actual-app/api`
+- `config`, `configManager`, `args`, `cwd`
+
+Pass custom script args after the file path:
+
+```bash
+npm start -- src/scratch/thing1.js --foo bar
+```
+
+Inside your script, read them from `ctx.args`.
+
 ## Commands
 
 ### Bank sync
