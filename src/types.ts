@@ -137,6 +137,12 @@ export interface RootConfig {
   balanceCategory?: string;
 
   /**
+   * Category ID for interest/dividend credit transactions
+   * @default ""
+   */
+  interestCategory?: string;
+
+  /**
    * Actual Budget server configuration
    * @default {}
    */

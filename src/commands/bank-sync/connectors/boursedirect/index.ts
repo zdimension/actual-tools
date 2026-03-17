@@ -68,7 +68,7 @@ export class BourseDirectConnector implements Connector {
     await fs.mkdir(userDataDir, { recursive: true });
 
     const context = await chromium.launchPersistentContext(userDataDir, {
-      headless: false,
+      headless: true,
     });
 
     const page = await context.newPage();
@@ -136,7 +136,7 @@ export class BourseDirectConnector implements Connector {
               }
               
               // Click submit button
-              await page.locator('#2FA-modal .buttons .primary').click();
+              await page.locator('[id="2FA-modal"] .buttons .primary').click();
             } else {
               throw new TwoFactorRequiredError();
             }

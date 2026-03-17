@@ -61,7 +61,7 @@ async function discoverCommands(): Promise<Map<string, Command>> {
  */
 function showHelp(commands: Map<string, Command>): void {
   console.log('Usage: npm start -- <command> [options]');
-  console.log('       npm start -- <path-to-script.js> [script-args...]');
+  console.log('       npm start -- src/<path-to-script.ts> [script-args...]');
   console.log('');
   console.log('Available commands:');
   console.log('');
@@ -79,6 +79,27 @@ function looksLikeScriptPath(input: string): boolean {
 }
 
 async function resolveScriptPath(input: string): Promise<string | null> {
+  // Normalize the input path first
+  const normalizedInput = path.normalize(input);
+  const relativePath = path.relative(process.cwd(), path.resolve(process.cwd(), normalizedInput));
+  
+  // Convert src/ to dist/ and .ts to .js for TypeScript files
+  let distPath = relativePath
+    .replace(/^src[\/\\]/, 'dist' + path.sep)
+    .replace(/\.ts$/, '.js');
+  
+  // Try dist version first (compiled TypeScript)
+  const fullDistPath = path.resolve(process.cwd(), distPath);
+  try {
+    const stat = await fs.stat(fullDistPath);
+    if (stat.isFile()) {
+      return fullDistPath;
+    }
+  } catch {
+    // Try direct path below
+  }
+
+  // Try direct path as fallback (for .js files in src)
   const directPath = path.resolve(process.cwd(), input);
   try {
     const stat = await fs.stat(directPath);
@@ -86,19 +107,7 @@ async function resolveScriptPath(input: string): Promise<string | null> {
       return directPath;
     }
   } catch {
-    // Try fallback below
-  }
-
-  const distPath = path.resolve(process.cwd(), input.replace(/^src\//, 'dist/'));
-  if (distPath !== directPath) {
-    try {
-      const stat = await fs.stat(distPath);
-      if (stat.isFile()) {
-        return distPath;
-      }
-    } catch {
-      // no-op
-    }
+    // not found
   }
 
   return null;

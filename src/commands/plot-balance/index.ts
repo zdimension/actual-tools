@@ -1,5 +1,4 @@
-import * as fs from 'fs/promises';
-import * as path from 'path';
+import * as http from 'http';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { BaseCommand } from '../base-command.js';
@@ -203,34 +202,48 @@ export class PlotBalanceCommand extends BaseCommand {
     // Generate HTML with Plotly
     const html = this.generateHtml(traces, owner, exclude, ownerTotals);
 
-    // Save HTML file
-    const outputPath = path.join(process.cwd(), 'balance-plot.html');
-    await fs.writeFile(outputPath, html, 'utf-8');
-
-    console.log(`\n✓ Plot saved to: ${outputPath}`);
-    console.log('  Opening in browser...');
-
-    // Open in default browser
-    await this.openInBrowser(outputPath);
+    // Serve HTML from a one-shot HTTP server and open in browser
+    await this.serveAndOpen(html);
   }
 
-  private async openInBrowser(filePath: string): Promise<void> {
+  private async serveAndOpen(html: string): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      const server = http.createServer((req, res) => {
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end(html);
+        // Shut down after the page is served — give the browser a moment to
+        // fetch any sub-resources before closing (Plotly is CDN-loaded so
+        // there are no local sub-resources, but a short grace period is safe).
+        setTimeout(() => server.close(() => resolve()), 500);
+      });
+
+      server.on('error', reject);
+
+      // Port 0 → OS picks a free port
+      server.listen(0, '127.0.0.1', async () => {
+        const addr = server.address() as { port: number };
+        const url = `http://127.0.0.1:${addr.port}`;
+        console.log(`\n✓ Serving plot at ${url}`);
+        console.log('  Opening in browser…');
+        try {
+          await this.openInBrowser(url);
+        } catch (err) {
+          console.error(`  ⚠ Could not open browser automatically: ${err}`);
+          console.log(`  Please open ${url} manually.`);
+        }
+      });
+    });
+  }
+
+  private async openInBrowser(url: string): Promise<void> {
     const platform = process.platform;
 
-    try {
-      if (platform === 'win32') {
-        // Windows
-        await execAsync(`start "" "${filePath}"`);
-      } else if (platform === 'darwin') {
-        // macOS
-        await execAsync(`open "${filePath}"`);
-      } else {
-        // Linux
-        await execAsync(`xdg-open "${filePath}"`);
-      }
-    } catch (error) {
-      console.error(`  ⚠ Could not open browser automatically: ${error}`);
-      console.log(`  Please open ${filePath} manually.`);
+    if (platform === 'win32') {
+      await execAsync(`start "" "${url}"`);
+    } else if (platform === 'darwin') {
+      await execAsync(`open "${url}"`);
+    } else {
+      await execAsync(`xdg-open "${url}"`);
     }
   }
 

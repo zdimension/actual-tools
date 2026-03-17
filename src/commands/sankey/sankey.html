@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Account Flow – Sankey</title>
+  <script src="https://unpkg.com/d3@7"></script>
+  <!-- <script src="https://unpkg.com/d3-sankey@0.12"></script> -->
+  <script src="https://cdn.jsdelivr.net/gh/nowthis/sankeymatic/build/sankey.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #f8f9fa; }
+    h1 { padding: 12px 20px; font-size: 1.1rem; color: #333; background: #fff;
+         border-bottom: 1px solid #ddd; }
+    #chart { width: 100vw; height: calc(100vh - 44px); }
+    .node rect { cursor: default; }
+    .node text { pointer-events: none; }
+    .link { fill: none; opacity: 0.45; }
+    .link:hover { opacity: 0.75; }
+    .tooltip {
+      position: fixed; pointer-events: none; background: rgba(0,0,0,.75);
+      color: #fff; padding: 6px 10px; border-radius: 4px; font-size: .8rem;
+      white-space: nowrap; display: none;
+    }
+  </style>
+</head>
+<body>
+  <h1>Account Flow — Income &rarr; Owner &rarr; Expense</h1>
+  <svg id="chart"></svg>
+  <div class="tooltip" id="tip"></div>
+  <script>
+    fetch('/data.json')
+      .then(r => r.json())
+      .then(({ nodes: RAW_NODES, links: RAW_LINKS }) => render(RAW_NODES, RAW_LINKS))
+      .catch(err => document.body.innerHTML = '<pre style="color:red;padding:20px">' + err + '</pre>');
+
+    function render(RAW_NODES, RAW_LINKS) {
+      // ── Layout ──────────────────────────────────────────────────────────────
+      const svg = d3.select('#chart');
+      const W   = document.getElementById('chart').clientWidth  || window.innerWidth;
+      const H   = document.getElementById('chart').clientHeight || window.innerHeight - 44;
+      const PAD = { t: 20, r: 200, b: 20, l: 200 };
+
+      svg.attr('width', W).attr('height', H);
+
+      // Build index map: id → index in nodes array (sankeymatic uses numeric refs)
+      const nodeIndex = new Map(RAW_NODES.map((n, i) => [n.id, i]));
+
+      // sankeymatic mutates these objects in place
+      const sankeyNodes = RAW_NODES.map((n, i) => ({ ...n, index: i }));
+      const sankeyFlows = RAW_LINKS
+        .filter(l => nodeIndex.has(l.source) && nodeIndex.has(l.target))
+        .map(l => ({
+          source: nodeIndex.get(l.source),  // numeric index
+          target: nodeIndex.get(l.target),
+          value:  l.value,
+        }));
+
+      const CW = W - PAD.l - PAD.r;   // content width
+      const CH = H - PAD.t - PAD.b;   // content height
+
+      // sankeymatic API: nodes/flows/size setters, then setup().layout(iterations)
+      d3.sankey()
+        .nodeWidth(18)
+        .nodeHeightFactor(0.5)
+        .nodeSpacingFactor(0.85)
+        .size({ w: CW, h: CH })
+        .nodes(sankeyNodes)
+        .flows(sankeyFlows)
+        .setup()
+        .layout(32);
+
+      // Custom bezier path using sankeymatic's {x, y, dx, dy, sy, ty, dy} model
+      function flowPath(f) {
+        const x0 = f.source.x + f.source.dx;
+        const x1 = f.target.x;
+        const xm = (x0 + x1) / 2;
+        const y0 = f.source.y + f.sy;
+        const y1 = f.target.y + f.ty;
+        return `M${x0},${y0}C${xm},${y0} ${xm},${y1} ${x1},${y1}` +
+               `L${x1},${y1 + f.dy}C${xm},${y1 + f.dy} ${xm},${y0 + f.dy} ${x0},${y0 + f.dy}Z`;
+      }
+
+      // ── Render ───────────────────────────────────────────────────────────────
+      const fmt = d3.format(',.0f');
+
+      const tip = document.getElementById('tip');
+      function showTip(evt, html) {
+        tip.innerHTML = html;
+        tip.style.display = 'block';
+        moveTip(evt);
+      }
+      function moveTip(evt) {
+        tip.style.left = (evt.clientX + 14) + 'px';
+        tip.style.top  = (evt.clientY - 10) + 'px';
+      }
+      function hideTip() { tip.style.display = 'none'; }
+
+      // Offset all drawing by PAD so the content area has room for labels
+      const g = svg.append('g').attr('transform', `translate(${PAD.l},${PAD.t})`);
+
+      // Links — only real (non-shadow) flows
+      const linkG = g.append('g').attr('class', 'links');
+      linkG.selectAll('path')
+        .data(sankeyFlows.filter(f => !f.isAShadow))
+        .join('path')
+          .attr('class', 'link')
+          .attr('d', flowPath)
+          .attr('stroke', d => d.source.color)
+          .attr('stroke-width', d => Math.max(1, d.dy))
+          .on('mousemove', (evt, d) => {
+            showTip(evt,
+              `<b>${d.source.label}</b> → <b>${d.target.label}</b><br/>€${fmt(d.value)}`);
+            moveTip(evt);
+          })
+          .on('mouseleave', hideTip);
+
+      // Nodes — skip shadow nodes injected by sankeymatic for multi-stage spans
+      const nodeG = g.append('g').attr('class', 'nodes');
+      const node  = nodeG.selectAll('g')
+        .data(sankeyNodes.filter(n => !n.isAShadow))
+        .join('g')
+          .attr('class', 'node')
+          .on('mousemove', (evt, d) => {
+            // d.value = max(total-in, total-out) set by sankeymatic
+            showTip(evt, `<b>${d.label}</b><br/>Total: €${fmt(d.value)}`);
+            moveTip(evt);
+          })
+          .on('mouseleave', hideTip);
+
+      node.append('rect')
+        .attr('x', d => d.x)
+        .attr('y', d => d.y)
+        .attr('width',  d => d.dx)
+        .attr('height', d => Math.max(2, d.dy))
+        .attr('fill', d => d.color)
+        .attr('rx', 3);
+
+      // Labels — coordinates are in content-space (inside the translated <g>)
+      node.append('text')
+        .attr('x', d => d.layer === 'owner'  ? d.x + d.dx / 2 :
+                         d.layer === 'income' ? d.x - 6 : d.x + d.dx + 6)
+        .attr('y', d => d.y + d.dy / 2)
+        .attr('dy', '0.35em')
+        .attr('text-anchor', d => d.layer === 'owner'  ? 'middle' :
+                                   d.layer === 'income' ? 'end'    : 'start')
+        .attr('font-size', 12)
+        .attr('fill', '#333')
+        .text(d => {
+          const maxLen = 32;
+          return d.label.length > maxLen ? d.label.slice(0, maxLen - 1) + '…' : d.label;
+        });
+    }
+  </script>
+</body>
+</html>

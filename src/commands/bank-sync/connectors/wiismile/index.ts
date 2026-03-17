@@ -60,7 +60,7 @@ export class WiiSmileConnector implements Connector {
     const userDataDir = `${dataPath}/${login}`;
     
     const context = await chromium.launchPersistentContext(userDataDir, {
-      headless: true,
+      headless: false,
       viewport: null,
       channel: "chrome"
       // args: ['--disable-blink-features=AutomationControlled'],
@@ -74,36 +74,29 @@ export class WiiSmileConnector implements Connector {
       await page.goto(WALLET_URL, { waitUntil: 'domcontentloaded' });
       await page.waitForTimeout(1000);
 
+      const bodyText = await page.textContent('body');
+      if (bodyText?.includes('Verification Required')) {
+        if (isManuallyRun) {
+          // Manual run: wait patiently for user to solve captcha
+          console.log('⚠ Verification required detected. Please solve the captcha in the browser...');
+          console.log('  Waiting for you to complete verification and reach the login page...');
+          await page.waitForURL(LOGIN_URL, { timeout: 600000 }); // Wait up to 10 minutes
+
+          await page.goto(WALLET_URL, { waitUntil: 'domcontentloaded' });
+          await page.waitForTimeout(1000);
+        } else {
+          // Automatic run: throw error to disable connector
+          const error = new TwoFactorRequiredError('Verification Required');
+          error.reason = 'captcha';
+          throw error;
+        }
+      }
+
       // Check if already logged in
       try {
         await page.waitForURL(WALLET_URL, { timeout: 4000 });
+        console.log('✓ Already logged in');
       } catch {
-        const bodyText = await page.textContent('body');
-        if (bodyText?.includes('Verification Required')) {
-          if (isManuallyRun) {
-            // Manual run: wait patiently for user to solve captcha
-            console.log('⚠ Verification required detected. Please solve the captcha in the browser...');
-            console.log('  Waiting for you to complete verification and reach the login page...');
-            await page.waitForURL(LOGIN_URL, { timeout: 600000 }); // Wait up to 10 minutes
-            
-            // Try to get cookies again after user solves captcha
-            const newCookies = await context.cookies();
-            const newPhpsessid = newCookies.find(c => c.name === 'PHPSESSID')?.value || '';
-            const newDatadome = newCookies.find(c => c.name === 'datadome')?.value || '';
-            
-            if (newPhpsessid && newDatadome) {
-              console.log('✓ Verification completed successfully!');
-              await context.close();
-              return [newPhpsessid, newDatadome];
-            }
-          } else {
-            // Automatic run: throw error to disable connector
-            const error = new TwoFactorRequiredError('Verification Required');
-            error.reason = 'captcha';
-            throw error;
-          }
-        }
-
         // Not logged in, need to authenticate
         console.log('Not logged in, logging in...');
 
@@ -126,6 +119,8 @@ export class WiiSmileConnector implements Connector {
         // Wait for successful login by checking URL change
         await page.waitForURL(WALLET_URL, { timeout: 400000 });
       }
+
+      await page.waitForTimeout(2000);
 
       // Extract cookies
       const cookies = await context.cookies();
@@ -187,7 +182,7 @@ class WiiSmileApi {
     this.headers.append('Pragma', 'no-cache');
     this.headers.append(
       'User-Agent',
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36'
     );
   }
 
@@ -202,7 +197,15 @@ class WiiSmileApi {
 
   private async fetch(url: string, method: string = 'GET', body: string | null = null): Promise<any> {
     const response = await fetch(`${API_ROOT}/${url}`, this.makeRequestOptions(method, body));
-    return await response.json();
+    // if response is not json, print it
+    try {
+      return await response.json();
+    } catch {
+      const text = await response.text();
+      console.error('Failed to parse JSON response from WiiSmile API:');
+      console.error(text);
+      throw new Error('Invalid JSON response');
+    }
   }
 
   async getCards(): Promise<RawCard[]> {

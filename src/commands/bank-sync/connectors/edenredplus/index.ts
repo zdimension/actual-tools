@@ -1,4 +1,4 @@
-import { chromium } from 'playwright';
+import { chromium } from 'patchright';
 import * as path from 'path';
 import * as fs from 'fs';
 import { Connector } from '../connector.interface.js';
@@ -84,10 +84,8 @@ export class EdenredPlusConnector implements Connector {
 
     const browser = await chromium.launchPersistentContext(path.join(userDataDir, "Chrome"), {
       headless: false,
-      args: ['--disable-blink-features=AutomationControlled'],
       viewport: null,
-      userAgent:
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+      channel: "chrome"
     });
 
     const page = await browser.newPage();
