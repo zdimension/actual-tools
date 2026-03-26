@@ -60,7 +60,7 @@ export class WiiSmileConnector implements Connector {
     const userDataDir = `${dataPath}/${login}`;
     
     const context = await chromium.launchPersistentContext(userDataDir, {
-      headless: false,
+      headless: isManuallyRun ? false : true,
       viewport: null,
       channel: "chrome"
       // args: ['--disable-blink-features=AutomationControlled'],
@@ -74,8 +74,8 @@ export class WiiSmileConnector implements Connector {
       await page.goto(WALLET_URL, { waitUntil: 'domcontentloaded' });
       await page.waitForTimeout(1000);
 
-      const bodyText = await page.textContent('body');
-      if (bodyText?.includes('Verification Required')) {
+      const hasCaptchaIframe = (await page.locator('iframe[title*="CAPTCHA"]').count()) > 0;
+      if (hasCaptchaIframe) {
         if (isManuallyRun) {
           // Manual run: wait patiently for user to solve captcha
           console.log('⚠ Verification required detected. Please solve the captcha in the browser...');
@@ -128,6 +128,7 @@ export class WiiSmileConnector implements Connector {
       const datadome = cookies.find(c => c.name === 'datadome')?.value || '';
 
       if (!phpsessid || !datadome) {
+        await page.waitForURL(LOGIN_URL, { timeout: 600000 }); // Wait up to 10 minutes
         throw new Error('Failed to extract session cookies');
       }
 

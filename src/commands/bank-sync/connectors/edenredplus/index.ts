@@ -22,6 +22,7 @@ interface EdenredPlusAccount {
 
 interface EdenredPlusTransaction {
   transactionId: string;
+  benefitName: string;
   name: string;
   type: 'REDEMPTION' | 'TOPUP';
   resultDetail: string;
@@ -124,6 +125,12 @@ export class EdenredPlusConnector implements Connector {
       await page.waitForTimeout(3000);
     }
 
+    if (page.url().includes('check-password-route')) {
+      console.log('  → Detected error page, refreshing...');
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await page.waitForTimeout(2000);
+    }
+
     // Check if we're on the login page
     if (page.url().includes('sso.eu.edenred.io/web/session/step/password')) {
       console.log('  → Login required, filling credentials...');
@@ -134,6 +141,15 @@ export class EdenredPlusConnector implements Connector {
       await page.waitForTimeout(2000);
 
       const currentUrl = page.url();
+
+      // Try to submit the form automatically
+      try {
+        await page.click('button[type="submit"]');
+      } catch (err) {
+        console.error(`  ⚠ Could not submit form automatically: ${err}`);
+        console.log(`  Please submit the login form manually in the browser.`);
+      }
+  
       console.log('  → Waiting for user to submit login (and captcha if needed)...');
       let submitAttempts = 0;
       while (page.url() === currentUrl && submitAttempts < 60) {
@@ -190,13 +206,13 @@ export class EdenredPlusConnector implements Connector {
     // Wait to be redirected back to home
     console.log('  → Waiting for redirect to home page...');
     let redirectAttempts = 0;
-    while (!page.url().includes('user.edenredplus.com') && redirectAttempts < 30) {
+    while (!page.url().includes('user.edenredplus.com/#/home') && redirectAttempts < 30) {
       console.log(`  ℹ Current URL: ${page.url()}`);
       await page.waitForTimeout(1000);
       redirectAttempts++;
     }
 
-    if (!page.url().includes('user.edenredplus.com')) {
+    if (!page.url().includes('user.edenredplus.com/#/home')) {
       throw new Error('Failed to redirect to home page');
     }
 
@@ -290,6 +306,11 @@ export class EdenredPlusConnector implements Connector {
 
       // Skip blocked transactions
       if (tx.resultDetail === 'ACCEPTANCE_PROFILE_BLOCKED') {
+        return [];
+      }
+
+      // Skip card fallback
+      if (tx.benefitName === 'CPM') {
         return [];
       }
 
