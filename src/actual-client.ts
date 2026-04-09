@@ -47,6 +47,7 @@ export class ActualClient {
         serverURL: this.config.url,
         password: this.config.password,
         dataDir: './actual-cache',
+        verbose: false
       });
 
       await api.downloadBudget(this.config.syncId);
@@ -161,7 +162,8 @@ export class ActualClient {
    */
   async importTransactions(
     accountId: string,
-    transactions: ActualTransaction[]
+    transactions: ActualTransaction[],
+    dryRun: boolean = false
   ): Promise<{ added: string[]; updated: string[] }> {
     this.ensureInitialized();
 
@@ -171,7 +173,9 @@ export class ActualClient {
         payee_name: tx.payee_name || tx.imported_payee,
       }));
 
-      const result = await api.importTransactions(accountId, normalizedTransactions);
+      const result = await api.importTransactions(accountId, normalizedTransactions, {
+        dryRun
+      });
       
       if (result.errors && result.errors.length > 0) {
         console.error(`⚠ Errors importing transactions:`, result.errors);

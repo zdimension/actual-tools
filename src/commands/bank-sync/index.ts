@@ -151,80 +151,89 @@ export class BankSyncCommand extends BaseCommand {
     if (connectorFilter && connectorFilter.length > 0) {
       connectorsToProcess = connectorsToProcess.filter(([name]) => connectorFilter.includes(name));
       if (connectorsToProcess.length === 0) {
-          console.error(`✗ No matching connectors found: ${connectorFilter.join(', ')}`);
-          console.error(`Available connectors: ${Object.keys(config.connectors).join(', ')}`);
-          await actualClient.shutdown();
-          process.exit(1);
-        }
-        console.log(`ℹ Running only selected connectors: ${connectorsToProcess.map(([name]) => name).join(', ')}\n`);
-      } else if (allManual) {
-        connectorsToProcess = connectorsToProcess.filter(([, connectorConfig]) => connectorConfig.requiresManualRun);
-        if (connectorsToProcess.length === 0) {
-          console.error('✗ No connectors are marked as manual (requiresManualRun: true).');
-          await actualClient.shutdown();
-          process.exit(1);
-        }
-        console.log(`ℹ Running all manual connectors: ${connectorsToProcess.map(([name]) => name).join(', ')}\n`);
+        console.error(`✗ No matching connectors found: ${connectorFilter.join(', ')}`);
+        console.error(`Available connectors: ${Object.keys(config.connectors).join(', ')}`);
+        await actualClient.shutdown();
+        process.exit(1);
       }
+      console.log(`ℹ Running only selected connectors: ${connectorsToProcess.map(([name]) => name).join(', ')}\n`);
+    } else if (allManual) {
+      connectorsToProcess = connectorsToProcess.filter(([, connectorConfig]) => connectorConfig.requiresManualRun);
+      if (connectorsToProcess.length === 0) {
+        console.error('✗ No connectors are marked as manual (requiresManualRun: true).');
+        await actualClient.shutdown();
+        process.exit(1);
+      }
+      console.log(`ℹ Running all manual connectors: ${connectorsToProcess.map(([name]) => name).join(', ')}\n`);
+    }
 
-      // Process each connector
-      for (const [connectorName, connectorConfig] of connectorsToProcess) {
-        console.log(`\n${'='.repeat(60)}`);
-        console.log(`Processing connector: ${connectorName}`);
-        console.log('='.repeat(60));
+    // Process each connector
+    for (const [connectorName, connectorConfig] of connectorsToProcess) {
+      console.log(`\n${'='.repeat(60)}`);
+      console.log(`Processing connector: ${connectorName}`);
+      console.log('='.repeat(60));
 
-        if (connectorConfig.disabled) {
+      // Determine if this is a manual run (via -c or -m flags)
+      const isManuallyRun = !!(connectorFilter || allManual);
+
+      if (connectorConfig.disabled) {
+        if (isManuallyRun) {
+          console.log(`⚠ Connector ${connectorName} is disabled (${connectorConfig.disabled}), re-enabling it for this run...`);
+          await configManager.updateConnectorDisabled(connectorName, false);
+          // Reload config to reflect the change
+          await configManager.load();
+          const updatedConfig = configManager.getConfig();
+          config.connectors = updatedConfig.connectors;
+        } else {
           console.log(`⚠ Skipping connector ${connectorName} (disabled: ${connectorConfig.disabled})`);
           continue;
         }
+      }
 
-        // Skip connectors requiring manual run unless explicitly selected
-        if (connectorConfig.requiresManualRun && !connectorFilter && !allManual) {
-          console.log(`⚠ Skipping connector ${connectorName} (requires manual run - use -c ${connectorName} to run)`);
+      // Skip connectors requiring manual run unless explicitly selected
+      if (connectorConfig.requiresManualRun && !connectorFilter && !allManual) {
+        console.log(`⚠ Skipping connector ${connectorName} (requires manual run - use -c ${connectorName} to run)`);
+        continue;
+      }
+
+      try {
+        await this.processConnector(
+          connectorName,
+          connectorConfig,
+          configManager,
+          actualClient,
+          config.clientId || '',
+          config.clientSecret || '',
+          config,
+          config.startCutoff,
+          dryRun,
+          isManuallyRun
+        );
+        
+        // Update last successful run timestamp (only if not a dry run)
+        if (!dryRun) {
+          await configManager.updateLastSuccessfulRun(connectorName);
+        }
+      } catch (error) {
+        if (error instanceof TwoFactorRequiredError) {
+          console.error(`✗ ${connectorName} requires 2FA. Disabling connector...`);
+          await configManager.updateConnectorDisabled(connectorName, '2fa');
           continue;
         }
-
-        try {
-          // Determine if this is a manual run (via -c or -m flags)
-          const isManuallyRun = !!(connectorFilter || allManual);
-          
-          await this.processConnector(
-            connectorName,
-            connectorConfig,
-            configManager,
-            actualClient,
-            config.clientId || '',
-            config.clientSecret || '',
-            config,
-            config.startCutoff,
-            dryRun,
-            isManuallyRun
-          );
-          
-          // Update last successful run timestamp (only if not a dry run)
-          if (!dryRun) {
-            await configManager.updateLastSuccessfulRun(connectorName);
-          }
-        } catch (error) {
-          if (error instanceof TwoFactorRequiredError) {
-            console.error(`✗ ${connectorName} requires 2FA. Disabling connector...`);
-            await configManager.updateConnectorDisabled(connectorName, '2fa');
-            continue;
-          }
-          console.error(`✗ Error processing connector ${connectorName}:`, error);
-        }
+        console.error(`✗ Error processing connector ${connectorName}:`, error);
       }
+    }
 
-      // Sync with server
-      if (!dryRun) {
-        console.log('\n\nSyncing with Actual server...');
-        await actualClient.sync();
-        console.log('✓ Sync complete');
-      } else {
-        console.log('\n\n🔍 Dry run complete - no changes were made');
-      }
+    // Sync with server
+    if (!dryRun) {
+      console.log('\n\nSyncing with Actual server...');
+      await actualClient.sync();
+      console.log('✓ Sync complete');
+    } else {
+      console.log('\n\n🔍 Dry run complete - no changes were made');
+    }
 
-      console.log('\n✓ All done!');
+    console.log('\n✓ All done!');
   }
 
   private async processConnector(
@@ -427,7 +436,7 @@ export class BankSyncCommand extends BaseCommand {
       return;
     }
 
-    if (dryRun) {
+    /*if (dryRun) {
       // In dry-run mode, print all operations
       console.log(`    🔍 Would import ${operations.length} operation(s):`);
       for (const tx of operations.slice(0, 5)) {
@@ -441,7 +450,12 @@ export class BankSyncCommand extends BaseCommand {
       const result = await actualClient.importTransactions(actualAccountId, operations);
 
       console.log(`    ✓ Added: ${result.added.length}, Updated: ${result.updated.length}`);
-    }
+    }*/
+
+    // Import to Actual
+    const result = await actualClient.importTransactions(actualAccountId, operations, dryRun);
+
+    console.log(`    ✓ Added: ${result.added.length}, Updated: ${result.updated.length}`);
   }
 
   private getConnector(
