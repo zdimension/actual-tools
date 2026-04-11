@@ -101,26 +101,47 @@ export class ConfigManager {
   }
 
   /**
-   * Get connector-specific configuration
+   * Get connector-specific configuration for a named account
    */
-  getConnectorConfig(connectorName: string): ConnectorConfig {
+  getConnectorConfig(connectorName: string, accountName: string): ConnectorConfig {
     if (!this.config) {
       throw new Error('Configuration not loaded. Call load() first.');
     }
 
-    const connectorConfig = this.config.connectors[connectorName];
-    if (!connectorConfig) {
+    const connectorAccounts = this.config.connectors[connectorName];
+    if (!connectorAccounts) {
       throw new Error(`Connector "${connectorName}" not found in configuration`);
+    }
+
+    const connectorConfig = connectorAccounts[accountName];
+    if (!connectorConfig) {
+      throw new Error(`Account "${accountName}" not found in connector "${connectorName}"`);
     }
 
     return connectorConfig;
   }
 
   /**
-   * Get account mapping for a connector
+   * Get all account names for a connector
    */
-  getAccountMapping(connectorName: string): AccountMapping {
-    const connectorConfig = this.getConnectorConfig(connectorName);
+  getConnectorAccountNames(connectorName: string): string[] {
+    if (!this.config) {
+      throw new Error('Configuration not loaded. Call load() first.');
+    }
+
+    const connectorAccounts = this.config.connectors[connectorName];
+    if (!connectorAccounts) {
+      return [];
+    }
+
+    return Object.keys(connectorAccounts);
+  }
+
+  /**
+   * Get account mapping for a connector account
+   */
+  getAccountMapping(connectorName: string, accountName: string): AccountMapping {
+    const connectorConfig = this.getConnectorConfig(connectorName, accountName);
     return connectorConfig.accountMapping || {};
   }
 
@@ -130,13 +151,14 @@ export class ConfigManager {
    */
   async addUnmappedAccounts(
     connectorName: string,
+    accountName: string,
     accounts: Array<{ vendorId: string; name: string }>
   ): Promise<void> {
     if (!this.config) {
       throw new Error('Configuration not loaded. Call load() first.');
     }
 
-    const connectorConfig = this.getConnectorConfig(connectorName);
+    const connectorConfig = this.getConnectorConfig(connectorName, accountName);
     
     // Initialize accountMapping if it doesn't exist
     if (!connectorConfig.accountMapping) {
@@ -161,6 +183,7 @@ export class ConfigManager {
    */
   async updateAccountMapping(
     connectorName: string,
+    accountName: string,
     vendorId: string,
     actualAccountId: string
   ): Promise<void> {
@@ -168,7 +191,7 @@ export class ConfigManager {
       throw new Error('Configuration not loaded. Call load() first.');
     }
 
-    const connectorConfig = this.getConnectorConfig(connectorName);
+    const connectorConfig = this.getConnectorConfig(connectorName, accountName);
     
     if (!connectorConfig.accountMapping) {
       connectorConfig.accountMapping = {};
@@ -181,25 +204,25 @@ export class ConfigManager {
   /**
    * Update connector disabled status (truthy disables the connector)
    */
-  async updateConnectorDisabled(connectorName: string, disabled: string | boolean): Promise<void> {
+  async updateConnectorDisabled(connectorName: string, accountName: string, disabled: string | boolean): Promise<void> {
     if (!this.config) {
       throw new Error('Configuration not loaded. Call load() first.');
     }
 
-    const connectorConfig = this.getConnectorConfig(connectorName);
+    const connectorConfig = this.getConnectorConfig(connectorName, accountName);
     connectorConfig.disabled = disabled;
     await this.save();
   }
 
   /**
-   * Update the last successful run timestamp for a connector
+   * Update the last successful run timestamp for a connector account
    */
-  async updateLastSuccessfulRun(connectorName: string): Promise<void> {
+  async updateLastSuccessfulRun(connectorName: string, accountName: string): Promise<void> {
     if (!this.config) {
       throw new Error('Configuration not loaded. Call load() first.');
     }
 
-    const connectorConfig = this.getConnectorConfig(connectorName);
+    const connectorConfig = this.getConnectorConfig(connectorName, accountName);
     connectorConfig.lastSuccessfulRun = new Date().toISOString();
     await this.save();
   }
@@ -207,8 +230,8 @@ export class ConfigManager {
   /**
    * Check if an account is mapped
    */
-  isAccountMapped(connectorName: string, vendorId: string): boolean {
-    const mapping = this.getAccountMapping(connectorName);
+  isAccountMapped(connectorName: string, accountName: string, vendorId: string): boolean {
+    const mapping = this.getAccountMapping(connectorName, accountName);
     const value = mapping[vendorId];
     return value !== undefined && !value.startsWith('**');
   }
@@ -217,17 +240,17 @@ export class ConfigManager {
    * Get the Actual account ID for a vendor account
    * Returns null if not mapped or starts with ** (unmapped)
    */
-  getActualAccountId(connectorName: string, vendorId: string): string | null {
-    const mapping = this.getAccountMapping(connectorName);
+  getActualAccountId(connectorName: string, accountName: string, vendorId: string): string | null {
+    const mapping = this.getAccountMapping(connectorName, accountName);
     const value = mapping[vendorId];
     return value && !value.startsWith('**') ? value : null;
   }
 
   /**
-   * Register a new connector with default values from connector-specific schema
-   * Creates a connector entry if it doesn't exist
+   * Register a new connector account with default values from connector-specific schema
+   * Creates a connector account entry if it doesn't exist
    */
-  async registerConnectorWithDefaults(connectorName: string): Promise<void> {
+  async registerConnectorWithDefaults(connectorName: string, accountName: string): Promise<void> {
     if (!this.config) {
       throw new Error('Configuration not loaded. Call load() first.');
     }
@@ -237,8 +260,13 @@ export class ConfigManager {
       this.config.connectors = {};
     }
 
-    // Don't overwrite an existing connector
-    if (this.config.connectors[connectorName]) {
+    // Ensure connector group exists
+    if (!this.config.connectors[connectorName]) {
+      this.config.connectors[connectorName] = {};
+    }
+
+    // Don't overwrite an existing account
+    if (this.config.connectors[connectorName][accountName]) {
       return;
     }
 
@@ -253,32 +281,32 @@ export class ConfigManager {
       const defaultConfig: ConnectorConfig = {};
       validate(defaultConfig);
 
-      // Add the connector with defaults
-      this.config.connectors[connectorName] = defaultConfig;
+      // Add the connector account with defaults
+      this.config.connectors[connectorName][accountName] = defaultConfig;
       await this.save();
 
       console.log(
-        `Created config entry for connector '${connectorName}'. ` +
+        `Created config entry for connector '${connectorName}/${accountName}'. ` +
         `Please configure it in config.json with your credentials and account mappings.`,
       );
     } catch (error) {
-      console.error(`Failed to register connector '${connectorName}':`, error);
+      console.error(`Failed to register connector '${connectorName}/${accountName}':`, error);
       throw error;
     }
   }
 
   /**
-   * Validate and fill missing fields for an existing connector entry
+   * Validate and fill missing fields for an existing connector account entry
    * Does not save automatically - call save() if modifications were made
    * Returns { errors: array or null if valid, modified: boolean }
    */
-  validateAndFillConnectorDefaults(connectorName: string): { errors: any[] | null; modified: boolean } {
+  validateAndFillConnectorDefaults(connectorName: string, accountName: string): { errors: any[] | null; modified: boolean } {
     if (!this.config) {
       throw new Error('Configuration not loaded. Call load() first.');
     }
 
-    if (!this.config.connectors?.[connectorName]) {
-      return { errors: [{ message: 'Connector not found in configuration' }], modified: false };
+    if (!this.config.connectors?.[connectorName]?.[accountName]) {
+      return { errors: [{ message: 'Connector account not found in configuration' }], modified: false };
     }
 
     try {
@@ -287,13 +315,13 @@ export class ConfigManager {
       const validate = ajv.compile(schema);
 
       // Deep clone the config to compare before and after
-      const configBefore = JSON.stringify(this.config.connectors[connectorName]);
+      const configBefore = JSON.stringify(this.config.connectors[connectorName][accountName]);
       
       // Validate and fill missing fields
-      const valid = validate(this.config.connectors[connectorName]);
+      const valid = validate(this.config.connectors[connectorName][accountName]);
       
       // Compare to detect if defaults were added
-      const configAfter = JSON.stringify(this.config.connectors[connectorName]);
+      const configAfter = JSON.stringify(this.config.connectors[connectorName][accountName]);
       const modified = configBefore !== configAfter;
 
       return { 
@@ -301,7 +329,7 @@ export class ConfigManager {
         modified 
       };
     } catch (error) {
-      console.warn(`⚠ Could not validate connector '${connectorName}':`, error);
+      console.warn(`⚠ Could not validate connector '${connectorName}/${accountName}':`, error);
       return { errors: [{ message: `Validation exception: ${error}` }], modified: false };
     }
   }

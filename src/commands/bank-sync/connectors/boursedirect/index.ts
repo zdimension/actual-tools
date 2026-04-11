@@ -102,7 +102,7 @@ export class BourseDirectConnector implements Connector {
         await page.keyboard.press('Enter');
 
         const start = Date.now();
-        for (;;) {
+        for (; ;) {
           // Check for 2FA prompt by evaluating in page context
           const twoFaInfo = await page.evaluate(() => {
             const modal = (globalThis as any).document.getElementById('2FA-modal');
@@ -117,24 +117,24 @@ export class BourseDirectConnector implements Connector {
 
           if (twoFaInfo.visible) {
             console.log('2FA modal detected!');
-            
+
             if (config.otpUrl) {
               const otpCode = this.generateOTPFromUrl(config.otpUrl);
               console.log(`Generated OTP code: ${otpCode}`);
-              
+
               // Check trusted checkbox if present
               try {
                 await page.locator('#trusted').check({ timeout: 1000 });
               } catch {
                 // Checkbox not present, continue
               }
-              
+
               // Type the six digits into the code inputs
               const codeInputs = await page.locator('.code-input > input').all();
               for (let i = 0; i < otpCode.length && i < codeInputs.length; i++) {
                 await codeInputs[i].fill(otpCode[i]);
               }
-              
+
               // Click submit button
               await page.locator('[id="2FA-modal"] .buttons .primary').click();
             } else {
@@ -196,7 +196,7 @@ export class BourseDirectConnector implements Connector {
     // Format: otpauth://totp/issuer:account?secret=BASE32SECRET&...
     const url = new URL(otpUrl);
     const secret = url.searchParams.get('secret');
-    
+
     if (!secret) {
       throw new Error('No secret found in otpauth URL');
     }
@@ -206,14 +206,14 @@ export class BourseDirectConnector implements Connector {
     const now = Math.floor(Date.now() / 1000);
     const counter = Math.floor(now / 30); // 30-second window
     const code = this.generateTOTP(buffer, counter);
-    
+
     return code.padStart(6, '0');
   }
 
   private base32Decode(str: string): Buffer {
     const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
     const bits: number[] = [];
-    
+
     for (const char of str.toUpperCase()) {
       const val = alphabet.indexOf(char);
       if (val === -1) throw new Error('Invalid base32 character');
@@ -224,13 +224,13 @@ export class BourseDirectConnector implements Connector {
     for (let i = 0; i < bits.length - bits.length % 8; i += 8) {
       bytes.push(parseInt(bits.slice(i, i + 8).join(''), 2));
     }
-    
+
     return Buffer.from(bytes);
   }
 
   private generateTOTP(secret: Buffer, counter: number): string {
     const counterBuffer = Buffer.alloc(8);
-    
+
     for (let i = 7; i >= 0; i--) {
       counterBuffer[i] = counter & 0xff;
       counter >>= 8;
@@ -301,79 +301,95 @@ class BourseDirectApi {
   }
 
   async getData(): Promise<[RawAccount[], RawOperation[]]> {
-    const data = await this.fetch('streaming/compteTempsReelCK.php?stream=0&nc=1');
-    const parsed = parseData(data.substring("message='".length, data.length - 1));
+    let data, parsed;
 
-    const id = parsed.portfolio[11];
-    const accounts: RawAccount[] = [
-      {
-        id: `${id}-especes`,
-        name: 'Espèces',
-        balance: makeFloat(parsed.portfolio[3]),
-        valId: 'especes',
-      },
-      ...parsed.assets.map((asset: any) => ({
-        id: `${id}-${asset[0].replace(/[ .]/g, '-')}`,
-        name: asset[0],
-        balance: asset[1],
-        valId: asset[6][0][1][0].split('=')[1].split('&')[0],
-      })),
-    ];
-
-    const dataOp = await this.fetch('priv/new/historique-de-compte.php');
-    const dom = new JSDOM(dataOp);
-    const rows = dom.window.document.querySelectorAll('.datas tr[class]');
-
-    const ops: RawOperation[] = [];
-
-    for (const row of rows) {
-      const cells = row.querySelectorAll('td');
-      const [d, m, y] = (cells[0]?.textContent || '').split('/');
-      if (!d || !m || !y) continue;
-      const isoDate = `${y}-${m}-${d}`;
-      const link = cells[2]?.querySelector('a');
-      const amount = makeFloat(cells[6]?.textContent || '0');
-      const label = [
-        (cells[3]?.textContent || '').trim(),
-        (cells[2]?.textContent || '').trim(),
-      ].join(' ');
-      const opId = `${id}-${y}-${m}-${d}-${label.replace(/[ .]/g, '-')}-${Math.floor(amount)}`;
-
-      if (link === null) {
-        ops.push({
-          id: opId,
-          date: isoDate,
-          label,
-          amount,
-          account: `${id}-especes`,
-        });
-      } else {
-        ops.push({
-          id: `${opId}-1`,
-          date: isoDate,
-          label,
-          amount,
-          account: `${id}-especes`,
-        });
-        const valId = link.href.split('=')[1].split('&')[0];
-        let acc = accounts.find(a => a.valId === valId);
-        if (!acc) {
-          acc = accounts.find(a => a.valId === valId.replace(/-(?:.*)$/, ''));
-          if (!acc) {
-            throw new Error(`Could not find account for valId ${valId}`);
-          }
-        }
-        ops.push({
-          id: `${opId}-2`,
-          date: isoDate,
-          label,
-          amount: -amount,
-          account: acc.id,
-        });
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      data = await this.fetch('streaming/compteTempsReelCK.php?stream=0&nc=1');
+      parsed = parseData(data.substring("message='".length, data.length - 1));
+      if (parsed.portfolio[3]) {
+        break;
       }
+      console.warn(`Attempt ${attempt} - Invalid data received, retrying...`);
+      await new Promise(resolve => setTimeout(resolve, 2000));
     }
 
-    return [accounts, ops];
+    try {
+      const id = parsed.portfolio[11];
+      const accounts: RawAccount[] = [
+        {
+          id: `${id}-especes`,
+          name: 'Espèces',
+          balance: makeFloat(parsed.portfolio[3]),
+          valId: 'especes',
+        },
+        ...parsed.assets.map((asset: any) => ({
+          id: `${id}-${asset[0].replace(/[ .]/g, '-')}`,
+          name: asset[0],
+          balance: asset[1],
+          valId: asset[6][0][1][0].split('=')[1].split('&')[0],
+        })),
+      ];
+
+      const dataOp = await this.fetch('priv/new/historique-de-compte.php');
+      const dom = new JSDOM(dataOp);
+      const rows = dom.window.document.querySelectorAll('.datas tr[class]');
+
+      const ops: RawOperation[] = [];
+
+      for (const row of rows) {
+        const cells = row.querySelectorAll('td');
+        const [d, m, y] = (cells[0]?.textContent || '').split('/');
+        if (!d || !m || !y) continue;
+        const isoDate = `${y}-${m}-${d}`;
+        const link = cells[2]?.querySelector('a');
+        const amount = makeFloat(cells[6]?.textContent || '0');
+        const label = [
+          (cells[3]?.textContent || '').trim(),
+          (cells[2]?.textContent || '').trim(),
+        ].join(' ');
+        const opId = `${id}-${y}-${m}-${d}-${label.replace(/[ .]/g, '-')}-${Math.floor(amount)}`;
+
+        if (link === null) {
+          ops.push({
+            id: opId,
+            date: isoDate,
+            label,
+            amount,
+            account: `${id}-especes`,
+          });
+        } else {
+          ops.push({
+            id: `${opId}-1`,
+            date: isoDate,
+            label,
+            amount,
+            account: `${id}-especes`,
+          });
+          const valId = link.href.split('=')[1].split('&')[0];
+          let acc = accounts.find(a => a.valId === valId);
+          if (!acc) {
+            acc = accounts.find(a => a.valId === valId.replace(/-(?:.*)$/, ''));
+            if (!acc) {
+              throw new Error(`Could not find account for valId ${valId}`);
+            }
+          }
+          ops.push({
+            id: `${opId}-2`,
+            date: isoDate,
+            label,
+            amount: -amount,
+            account: acc.id,
+          });
+        }
+      }
+
+      return [accounts, ops];
+    } catch (error) {
+      console.error('Error parsing Bourse Direct data:', error);
+      console.error('Raw data was:', data);
+      console.error('Parsed data was:', parsed);
+      throw new Error('Failed to parse Bourse Direct data');
+    }
   }
 }
 

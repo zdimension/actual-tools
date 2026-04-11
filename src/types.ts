@@ -150,9 +150,13 @@ export interface RootConfig {
 
   /**
    * Connector configurations
+   * Each connector maps account names to their individual configs
+   * e.g. { "boursedirect": { "tom": { ... }, "alice": { ... } } }
    * @default {}
    */
   connectors: {
-    [connectorName: string]: ConnectorConfig;
+    [connectorName: string]: {
+      [accountName: string]: ConnectorConfig;
+    };
   };
 }

@@ -68,10 +68,13 @@ export class BankSyncCommand extends BaseCommand {
   private async runSummary(config: RootConfig): Promise<void> {
     console.log('Bank Sync Connectors Summary');
     console.log('='.repeat(80));
-    for (const [connectorName, connectorConfig] of Object.entries(config.connectors)) {
-      const status = connectorConfig.disabled ? 'Disabled' : 'Enabled';
-      const lastRun = connectorConfig.lastSuccessfulRun ? new Date(connectorConfig.lastSuccessfulRun).toLocaleString() : 'Never';
-      console.log(`${connectorName.padEnd(20)} | ${status.padEnd(10)} | Last Successful Run: ${lastRun}`);
+    for (const [connectorName, connectorAccounts] of Object.entries(config.connectors)) {
+      for (const [accountName, connectorConfig] of Object.entries(connectorAccounts)) {
+        const label = `${connectorName}/${accountName}`;
+        const status = connectorConfig.disabled ? 'Disabled' : 'Enabled';
+        const lastRun = connectorConfig.lastSuccessfulRun ? new Date(connectorConfig.lastSuccessfulRun).toLocaleString() : 'Never';
+        console.log(`${label.padEnd(30)} | ${status.padEnd(10)} | Last Successful Run: ${lastRun}`);
+      }
     }
   }
 
@@ -82,8 +85,11 @@ export class BankSyncCommand extends BaseCommand {
     }
 
     // Register any missing connectors that were explicitly selected with -c
+    // Filter format: "connector" (all accounts) or "connector/account" (specific account)
     if (connectorFilter && connectorFilter.length > 0) {
-      for (const connectorName of connectorFilter) {
+      for (const filterEntry of connectorFilter) {
+        const [connectorName] = filterEntry.split('/');
+
         // Check if connector is known
         if (!(await this.isKnownConnector(connectorName))) {
           const knownConnectors = await this.getKnownConnectors();
@@ -93,15 +99,26 @@ export class BankSyncCommand extends BaseCommand {
           process.exit(1);
         }
 
-        // Register if missing (manual mode only)
+        // Register if missing (manual mode only) — uses "default" as account name
         if (!config.connectors[connectorName]) {
-          await configManager.registerConnectorWithDefaults(connectorName);
+          const accountName = filterEntry.includes('/') ? filterEntry.split('/')[1] : 'default';
+          await configManager.registerConnectorWithDefaults(connectorName, accountName);
           // Reload config to reflect the newly added connector
           await configManager.load();
           const updatedConfig = configManager.getConfig();
           config.connectors = updatedConfig.connectors;
-          console.log(`✓ Created config entry for connector "${connectorName}"`);
+          console.log(`✓ Created config entry for connector "${connectorName}/${accountName}"`);
         }
+      }
+    }
+
+    // Build list of (connectorName, accountName, connectorConfig) tuples to process
+    type ConnectorEntry = [string, string, any];
+    let connectorsToProcess: ConnectorEntry[] = [];
+
+    for (const [connectorName, connectorAccounts] of Object.entries(config.connectors)) {
+      for (const [accountName, connectorConfig] of Object.entries(connectorAccounts)) {
+        connectorsToProcess.push([connectorName, accountName, connectorConfig]);
       }
     }
 
@@ -109,11 +126,12 @@ export class BankSyncCommand extends BaseCommand {
     let configModified = false;
     const validationErrors: Map<string, any[]> = new Map();
     
-    for (const connectorName of Object.keys(config.connectors)) {
-      const { errors, modified } = configManager.validateAndFillConnectorDefaults(connectorName);
+    for (const [connectorName, accountName] of connectorsToProcess) {
+      const { errors, modified } = configManager.validateAndFillConnectorDefaults(connectorName, accountName);
+      const label = `${connectorName}/${accountName}`;
       
       if (errors) {
-        validationErrors.set(connectorName, errors);
+        validationErrors.set(label, errors);
       }
       
       if (modified) {
@@ -147,30 +165,40 @@ export class BankSyncCommand extends BaseCommand {
     }
 
     // Filter connectors if specified
-    let connectorsToProcess = Object.entries(config.connectors);
+    // Filter format: "connector" (all accounts) or "connector/account" (specific account)
     if (connectorFilter && connectorFilter.length > 0) {
-      connectorsToProcess = connectorsToProcess.filter(([name]) => connectorFilter.includes(name));
+      connectorsToProcess = connectorsToProcess.filter(([connectorName, accountName]) => {
+        return connectorFilter.some(filter => {
+          if (filter.includes('/')) {
+            const [filterConnector, filterAccount] = filter.split('/');
+            return connectorName === filterConnector && accountName === filterAccount;
+          }
+          return connectorName === filter;
+        });
+      });
       if (connectorsToProcess.length === 0) {
         console.error(`✗ No matching connectors found: ${connectorFilter.join(', ')}`);
-        console.error(`Available connectors: ${Object.keys(config.connectors).join(', ')}`);
+        const allLabels = Object.entries(config.connectors).flatMap(([cn, accs]) => Object.keys(accs).map(an => `${cn}/${an}`));
+        console.error(`Available connectors: ${allLabels.join(', ')}`);
         await actualClient.shutdown();
         process.exit(1);
       }
-      console.log(`ℹ Running only selected connectors: ${connectorsToProcess.map(([name]) => name).join(', ')}\n`);
+      console.log(`ℹ Running only selected connectors: ${connectorsToProcess.map(([cn, an]) => `${cn}/${an}`).join(', ')}\n`);
     } else if (allManual) {
-      connectorsToProcess = connectorsToProcess.filter(([, connectorConfig]) => connectorConfig.requiresManualRun);
+      connectorsToProcess = connectorsToProcess.filter(([, , connectorConfig]) => connectorConfig.requiresManualRun);
       if (connectorsToProcess.length === 0) {
         console.error('✗ No connectors are marked as manual (requiresManualRun: true).');
         await actualClient.shutdown();
         process.exit(1);
       }
-      console.log(`ℹ Running all manual connectors: ${connectorsToProcess.map(([name]) => name).join(', ')}\n`);
+      console.log(`ℹ Running all manual connectors: ${connectorsToProcess.map(([cn, an]) => `${cn}/${an}`).join(', ')}\n`);
     }
 
-    // Process each connector
-    for (const [connectorName, connectorConfig] of connectorsToProcess) {
+    // Process each connector account
+    for (const [connectorName, accountName, connectorConfig] of connectorsToProcess) {
+      const label = `${connectorName}/${accountName}`;
       console.log(`\n${'='.repeat(60)}`);
-      console.log(`Processing connector: ${connectorName}`);
+      console.log(`Processing connector: ${label}`);
       console.log('='.repeat(60));
 
       // Determine if this is a manual run (via -c or -m flags)
@@ -178,27 +206,28 @@ export class BankSyncCommand extends BaseCommand {
 
       if (connectorConfig.disabled) {
         if (isManuallyRun) {
-          console.log(`⚠ Connector ${connectorName} is disabled (${connectorConfig.disabled}), re-enabling it for this run...`);
-          await configManager.updateConnectorDisabled(connectorName, false);
+          console.log(`⚠ Connector ${label} is disabled (${connectorConfig.disabled}), re-enabling it for this run...`);
+          await configManager.updateConnectorDisabled(connectorName, accountName, false);
           // Reload config to reflect the change
           await configManager.load();
           const updatedConfig = configManager.getConfig();
           config.connectors = updatedConfig.connectors;
         } else {
-          console.log(`⚠ Skipping connector ${connectorName} (disabled: ${connectorConfig.disabled})`);
+          console.log(`⚠ Skipping connector ${label} (disabled: ${connectorConfig.disabled})`);
           continue;
         }
       }
 
       // Skip connectors requiring manual run unless explicitly selected
       if (connectorConfig.requiresManualRun && !connectorFilter && !allManual) {
-        console.log(`⚠ Skipping connector ${connectorName} (requires manual run - use -c ${connectorName} to run)`);
+        console.log(`⚠ Skipping connector ${label} (requires manual run - use -c ${connectorName} to run)`);
         continue;
       }
 
       try {
         await this.processConnector(
           connectorName,
+          accountName,
           connectorConfig,
           configManager,
           actualClient,
@@ -212,15 +241,15 @@ export class BankSyncCommand extends BaseCommand {
         
         // Update last successful run timestamp (only if not a dry run)
         if (!dryRun) {
-          await configManager.updateLastSuccessfulRun(connectorName);
+          await configManager.updateLastSuccessfulRun(connectorName, accountName);
         }
       } catch (error) {
         if (error instanceof TwoFactorRequiredError) {
-          console.error(`✗ ${connectorName} requires 2FA. Disabling connector...`);
-          await configManager.updateConnectorDisabled(connectorName, '2fa');
+          console.error(`✗ ${label} requires 2FA. Disabling connector...`);
+          await configManager.updateConnectorDisabled(connectorName, accountName, '2fa');
           continue;
         }
-        console.error(`✗ Error processing connector ${connectorName}:`, error);
+        console.error(`✗ Error processing connector ${label}:`, error);
       }
     }
 
@@ -238,6 +267,7 @@ export class BankSyncCommand extends BaseCommand {
 
   private async processConnector(
     connectorName: string,
+    accountName: string,
     connectorConfig: any,
     configManager: ConfigManager,
     actualClient: ActualClient,
@@ -255,8 +285,8 @@ export class BankSyncCommand extends BaseCommand {
       return;
     }
 
-    // Prepare data path for connector
-    const dataPath = path.join(process.cwd(), 'data', connectorName);
+    // Prepare data path for connector account
+    const dataPath = path.join(process.cwd(), 'data', connectorName, accountName);
 
     // Fetch data from connector
     const result = await connector.fetchTransactions(connectorConfig, dataPath, isManuallyRun);
@@ -276,7 +306,7 @@ export class BankSyncCommand extends BaseCommand {
     }
 
     // Get account mapping
-    const accountMapping = configManager.getAccountMapping(connectorName);
+    const accountMapping = configManager.getAccountMapping(connectorName, accountName);
 
     // Build map of transactions by vendor account ID (single iteration)
     const transactionsByAccount = new Map<string, VendorTransaction[]>();
@@ -332,10 +362,10 @@ export class BankSyncCommand extends BaseCommand {
           actualAccountId = 'dry-run-account-id';
         } else {
           console.log(`  → Creating new account "${account.name}"...`);
-          actualAccountId = await actualClient.createAccount(account.name, account.balance || 0);
+          actualAccountId = await actualClient.createAccount(account.name, 0);
 
           // Update config with the new account ID
-          await configManager.updateAccountMapping(connectorName, vendorId, actualAccountId);
+          await configManager.updateAccountMapping(connectorName, accountName, vendorId, actualAccountId);
         }
       } else {
         // Case 4: Mapped to an actual account ID
@@ -385,7 +415,7 @@ export class BankSyncCommand extends BaseCommand {
         console.log(`    - ${account.name} (${account.vendorId})`);
       }
       console.log('  → Adding to config.json...');
-      await configManager.addUnmappedAccounts(connectorName, unmappedAccounts);
+      await configManager.addUnmappedAccounts(connectorName, accountName, unmappedAccounts);
       console.log('  ✓ Please update config.json with Actual account IDs or "new" to auto-create');
     }
   }
