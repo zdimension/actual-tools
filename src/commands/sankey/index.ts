@@ -5,7 +5,7 @@ import { BaseCommand } from '../base-command.js';
 import { ConfigManager } from '../../config-manager.js';
 import { ActualClient } from '../../actual-client.js';
 import { RootConfig } from '../../types.js';
-import { TransactionEntity } from '@actual-app/api/@types/loot-core/src/types/models/transaction.js';
+import type { TransactionEntity } from '@actual-app/core/types/models';
 
 const execAsync = promisify(exec);
 

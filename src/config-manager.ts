@@ -1,6 +1,6 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import Ajv from 'ajv';
+import { Ajv } from 'ajv';
 import { RootConfig, AccountMapping, ConnectorConfig } from './types.js';
 import { SchemaProvider } from './schema-provider.js';
 

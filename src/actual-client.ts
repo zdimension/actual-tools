@@ -1,7 +1,7 @@
 import * as api from '@actual-app/api';
 import { utils } from '@actual-app/api';
 import { ActualConfig, ActualTransaction } from './types.js';
-import { APICategoryEntity, APICategoryGroupEntity } from '@actual-app/api/@types/loot-core/src/server/api-models.js';
+import type { APICategoryEntity, APICategoryGroupEntity } from '@actual-app/core/server/api-models';
 
 /**
  * Wrapper around the Actual Budget API
