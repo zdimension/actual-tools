@@ -131,6 +131,15 @@ export class EdenredPlusConnector implements Connector {
       await page.waitForTimeout(2000);
     }
 
+    await page.goto('https://user.edenredplus.com/#/signin');
+
+    // wait for text "Connectez votre compte"
+    try {
+      await page.waitForSelector('text=Connectez votre compte', { timeout: 3000 });
+    } catch (err) {
+      console.warn('  ⚠ "Connectez votre compte" text not found, proceeding anyway...');
+    }
+
     // Check if we're on the login page
     if (page.url().includes('sso.eu.edenred.io/web/session/step/password')) {
       console.log('  → Login required, filling credentials...');
@@ -304,8 +313,11 @@ export class EdenredPlusConnector implements Connector {
         throw new Error(`Unsupported transaction type: ${tx.type}`);
       }
 
-      // Skip blocked transactions
-      if (tx.resultDetail === 'ACCEPTANCE_PROFILE_BLOCKED') {
+      // Skip transactions declined for known reasons
+      if ([
+        'TXN_VELOCITY_EXCEEDED', // daily limit exceeded
+        'ACCEPTANCE_PROFILE_BLOCKED', // ineligible seller
+      ].includes(tx.resultDetail)) {
         return [];
       }
 
@@ -316,7 +328,7 @@ export class EdenredPlusConnector implements Connector {
 
       // Validate result
       if (tx.resultDetail !== 'SUCCESSFUL') {
-        throw new Error(`Transaction ${tx.transactionId} is not SUCCESSFUL: ${tx.resultDetail}`);
+        throw new Error(`Transaction ${tx.transactionId} is not SUCCESSFUL: ${tx.resultDetail} (${JSON.stringify(tx)})`);
       }
 
       // Validate currency

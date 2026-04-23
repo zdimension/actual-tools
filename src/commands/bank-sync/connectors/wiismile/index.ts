@@ -60,7 +60,7 @@ export class WiiSmileConnector implements Connector {
     const userDataDir = `${dataPath}/${login}`;
     
     const context = await chromium.launchPersistentContext(userDataDir, {
-      headless: isManuallyRun ? false : true,
+      headless: false,/*isManuallyRun ? false : true,*/
       viewport: null,
       channel: "chrome"
       // args: ['--disable-blink-features=AutomationControlled'],
@@ -181,6 +181,7 @@ class WiiSmileApi {
     this.headers.append('Connection', 'keep-alive');
     this.headers.append('Cookie', `PHPSESSID=${phpsessid}; datadome=${datadome}`);
     this.headers.append('Pragma', 'no-cache');
+    this.headers.append('sec-ch-ua-platform', '"Windows"');
     this.headers.append(
       'User-Agent',
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36'
@@ -200,7 +201,15 @@ class WiiSmileApi {
     const response = await fetch(`${API_ROOT}/${url}`, this.makeRequestOptions(method, body));
     // if response is not json, print it
     try {
-      return await response.json();
+      const res: any = await response.json();
+
+      if (res.url) {
+        console.error(`API response is probable 2FA block: ${JSON.stringify(res)}`);
+        const error = new TwoFactorRequiredError('API returned 2FA URL');
+        error.reason = '2fa';
+        throw error;
+      }
+      return res;
     } catch {
       const text = await response.text();
       console.error('Failed to parse JSON response from WiiSmile API:');
@@ -220,6 +229,7 @@ class WiiSmileApi {
 
   async getAllOperations(): Promise<RawCard[]> {
     const cards = await this.getCards();
+
     console.log(`Got ${cards.length} cards`);
 
     await Promise.all(
