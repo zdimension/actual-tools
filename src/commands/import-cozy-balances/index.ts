@@ -52,8 +52,8 @@ export class ImportCozyBalancesCommand extends BaseCommand {
       this.baseUrl += '/';
     }
 
-    if (!config.balanceCategory) {
-      console.error('❌ balanceCategory must be configured in config.json');
+    if (!config.balanceUpdate?.categoryId) {
+      console.error('❌ balance update category must be configured in config.json');
       process.exit(1);
     }
 
@@ -147,7 +147,7 @@ export class ImportCozyBalancesCommand extends BaseCommand {
             amount: delta,
             imported_payee: 'Mise à jour solde',
             imported_id: `cozy-balance/${cozyAccount._id}/${date}`,
-            category: config.balanceCategory,
+            category: config.balanceUpdate!.categoryId,
           };
 
           await actualClient.importTransactions(actualAccountId, [adjustment]);

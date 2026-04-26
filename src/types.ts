@@ -131,10 +131,21 @@ export interface RootConfig {
   startCutoff?: string;
 
   /**
-   * Category ID for balance update operations
-   * @default ""
+   * Balance update config
    */
-  balanceCategory?: string;
+  balanceUpdate?: {
+    /**
+     * Category ID for balance update transactions
+     * @default ""
+     */
+    categoryId: string;
+
+    /**
+     * Number of days between balance updates (e.g., 7 for weekly)
+     * @default 7
+     */
+    frequencyDays: number;
+  };
 
   /**
    * Category ID for interest/dividend credit transactions

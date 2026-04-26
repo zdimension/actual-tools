@@ -213,10 +213,10 @@ export class YieldAnalysisCommand extends BaseCommand {
     config: RootConfig,
     _args: string[]
   ): Promise<void> {
-    const balanceCategoryId = config.balanceCategory;
+    const balanceCategoryId = config.balanceUpdate?.categoryId;
     const interestCategoryId = config.interestCategory;
 
-    if (!balanceCategoryId) throw new Error('config.balanceCategory is not set');
+    if (!balanceCategoryId) throw new Error('config.balanceUpdate.categoryId is not set');
     if (!interestCategoryId) throw new Error('config.interestCategory is not set');
 
     const today = new Date().toISOString().slice(0, 10);

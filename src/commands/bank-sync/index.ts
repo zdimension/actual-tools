@@ -1,7 +1,7 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
-import { utils } from '@actual-app/api';
+import { q, utils } from '@actual-app/api';
 import { BaseCommand } from '../base-command.js';
 import { ConfigManager } from '../../config-manager.js';
 import { ActualClient } from '../../actual-client.js';
@@ -518,20 +518,17 @@ export class BankSyncCommand extends BaseCommand {
    */
   private async getLatestTransactionDate(actualClient: ActualClient, accountId: string): Promise<string | null> {
     try {
-      const transactions = await actualClient.getTransactions(accountId);
-      if (transactions.length === 0) {
+      const latest = (await actualClient.aqlQuery(
+        q('transactions')
+          .filter({ account: accountId })
+          .orderBy({ date: 'desc' })
+          .select(['date'])
+          .limit(1)
+      ));
+      if (latest.length === 0) {
         return null;
       }
-
-      // Find the latest transaction date
-      let latestDate = transactions[0].date;
-      for (const tx of transactions) {
-        if (tx.date > latestDate) {
-          latestDate = tx.date;
-        }
-      }
-
-      return latestDate;
+      return latest[0].date;
     } catch (error) {
       console.error(`  ⚠ Could not fetch latest transaction date: ${error}`);
       return null;
@@ -562,9 +559,24 @@ export class BankSyncCommand extends BaseCommand {
       return null; // Not an investment account, skip
     }
 
-    if (!config.balanceCategory) {
-      console.log(`  ⚠ Investment account "${account.name}" but no balanceCategory configured`);
+    if (!config.balanceUpdate?.categoryId) {
+      console.log(`  ⚠ Investment account "${account.name}" but no balance update category configured`);
       return null;
+    }
+
+    const dateThreshold = new Date();
+    dateThreshold.setDate(dateThreshold.getDate() - (config.balanceUpdate?.frequencyDays || 7));
+
+    // Check no balance update has been done recently
+    const latestTxDate: number = await actualClient.aqlQuery(
+      q('transactions')
+        .filter({ account: actualAccountId, category: config.balanceUpdate.categoryId, date: { $gte: dateThreshold.toISOString().split('T')[0] } })
+        .calculate({ $count: '*' })
+    );
+
+    if (latestTxDate > 0) {
+      console.log(`  ℹ Recent balance update already exists for "${account.name}", skipping balance adjustment`);
+      return null; // Recent balance update already exists, skip
     }
 
     try {
@@ -586,7 +598,7 @@ export class BankSyncCommand extends BaseCommand {
         amount: delta,
         imported_payee: 'Mise à jour solde',
         imported_id: `${connectorName}/${account.vendorId}/balance-adjustment-${today}`,
-        category: config.balanceCategory,
+        category: config.balanceUpdate!.categoryId,
       };
 
       return adjustmentOp;

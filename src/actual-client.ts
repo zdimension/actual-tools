@@ -2,6 +2,8 @@ import * as api from '@actual-app/api';
 import { utils } from '@actual-app/api';
 import { ActualConfig, ActualTransaction } from './types.js';
 import type { APICategoryEntity, APICategoryGroupEntity } from '@actual-app/core/server/api-models';
+import { TransactionEntity } from '@actual-app/core/types/models';
+import { Query } from '@actual-app/core/shared/query';
 
 /**
  * Wrapper around the Actual Budget API
@@ -78,7 +80,7 @@ export class ActualClient {
   /**
    * Get all category groups from Actual
    */
-  async getCategoryGroups(): Promise<any[]> {
+  async getCategoryGroups(): Promise<APICategoryGroupEntity[]> {
     this.ensureInitialized();
     return await api.getCategoryGroups();
   }
@@ -89,7 +91,7 @@ export class ActualClient {
    * @param startDate Start date (YYYY-MM-DD), empty string means no filter (default: '')
    * @param endDate End date (YYYY-MM-DD), empty string means no filter (default: '')
    */
-  async getTransactions(accountId: string, startDate: string = '', endDate: string = ''): Promise<any[]> {
+  async getTransactions(accountId: string, startDate: string = '', endDate: string = ''): Promise<TransactionEntity[]> {
     this.ensureInitialized();
     return await api.getTransactions(accountId, startDate, endDate);
   }
@@ -188,6 +190,11 @@ export class ActualClient {
     } catch (error) {
       throw new Error(`Failed to import transactions to account ${accountId}: ${error}`);
     }
+  }
+
+  async aqlQuery(query: Query): Promise<any> {
+    this.ensureInitialized();
+    return ((await api.aqlQuery(query)) as any).data;
   }
 
   /**
