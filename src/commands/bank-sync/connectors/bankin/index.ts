@@ -108,7 +108,7 @@ export class BankinConnector implements Connector {
     await this.loadDeviceData(dataPath);
 
     // Initialize session
-    await this.init();
+    await this.init(dataPath);
 
     // Save device ID for future use
     await this.saveDeviceData(dataPath);
@@ -132,10 +132,11 @@ export class BankinConnector implements Connector {
   /**
    * Initialize the Bankin API session
    */
-  private async init(): Promise<void> {
+  private async init(dataPath: string): Promise<void> {
     if (!this.bankinDeviceId) {
       console.log('Generating device ID...');
       await this.generateDeviceId();
+      await this.saveDeviceData(dataPath);
       console.log('✓ Device ID generated');
     }
 
