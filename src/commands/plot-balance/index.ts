@@ -193,7 +193,7 @@ export class PlotBalanceCommand extends BaseCommand {
           x: ownerHistory.map(p => p.date),
           y: ownerHistory.map(p => p.balance),
           mode: 'lines',
-          line: { shape: 'hv', width: 3, dash: 'dash' },
+          line: { shape: 'hv', dash: 'dash' },
           type: 'scatter',
         });
       }

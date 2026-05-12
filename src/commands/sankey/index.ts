@@ -6,6 +6,7 @@ import { ConfigManager } from '../../config-manager.js';
 import { ActualClient } from '../../actual-client.js';
 import { RootConfig } from '../../types.js';
 import type { TransactionEntity } from '@actual-app/core/types/models';
+import { APIAccountEntity } from '@actual-app/api/models';
 
 const execAsync = promisify(exec);
 
@@ -45,6 +46,18 @@ export class SankeyCommand extends BaseCommand {
     // Optional -g / --group: group by category group instead of leaf category
     const useGroups = args.includes('-g') || args.includes('--group');
 
+    // Optional -f / --op-filter: filter op by expression
+    const opFilterArg = this.getArg(args, ['-f', '--op-filter']);
+    const opFilter = opFilterArg
+      ? eval(`(_) => (${opFilterArg})`) as (op: TransactionEntity) => boolean
+      : null;
+
+    // Optional -F / --acc-filter: filter accounts by expression
+    const accFilterArg = this.getArg(args, ['-F', '--acc-filter']);
+    const accFilter = accFilterArg
+      ? eval(`(_) => (${accFilterArg})`) as (acc: APIAccountEntity) => boolean
+      : null;
+
     console.log('Fetching accounts, categories and transactions…');
 
     const [accounts, categoryList, groupList] = await Promise.all([
@@ -65,14 +78,14 @@ export class SankeyCommand extends BaseCommand {
       }
     }
     // Also pick up any leaves from the flat list that getCategoryGroups may not cover
-    for (const c of categoryList as any[]) {
-      if (c.id && c.name && !c.categories && !catName.has(c.id)) {
+    for (const c of categoryList) {
+      if (c.id && c.name && !(c as any).categories && !catName.has(c.id)) {
         catName.set(c.id, c.name);
       }
     }
 
     // Active accounts only
-    const activeAccounts = (accounts as any[]);//.filter(a => !a.closed);
+    const activeAccounts = accounts;//.filter(a => !a.closed);
 
     // owner → categoryId → sum (in euros)
     const flow = new Map<string, Map<string, number>>();
@@ -80,6 +93,7 @@ export class SankeyCommand extends BaseCommand {
     for (const acc of activeAccounts) {
       const owner = acc.name.split(/\s+/)[0];
       if (ownerFilter && !ownerFilter.has(owner)) continue;
+      if (accFilter && !accFilter(acc)) continue;
 
       const accTxs = await actualClient.getTransactions(acc.id);
       const txs: TransactionEntity[] = [
@@ -90,6 +104,7 @@ export class SankeyCommand extends BaseCommand {
       ];
 
       for (const tx of txs) {
+        if (opFilter && !opFilter(tx)) continue;
         if (tx.transfer_id) continue;  // skip transfers (they clutter the diagram and don't represent real inflow/outflow)
         if (!tx.category) tx.category = 'N/A';
 

@@ -1,7 +1,7 @@
 import * as api from '@actual-app/api';
 import { utils } from '@actual-app/api';
 import { ActualConfig, ActualTransaction } from './types.js';
-import type { APICategoryEntity, APICategoryGroupEntity } from '@actual-app/core/server/api-models';
+import type { APIAccountEntity, APICategoryEntity, APICategoryGroupEntity } from '@actual-app/core/server/api-models';
 import { TransactionEntity } from '@actual-app/core/types/models';
 import { Query } from '@actual-app/core/shared/query';
 
@@ -64,7 +64,7 @@ export class ActualClient {
   /**
    * Get all accounts from Actual
    */
-  async getAccounts(): Promise<any[]> {
+  async getAccounts(): Promise<APIAccountEntity[]> {
     this.ensureInitialized();
     return await api.getAccounts();
   }
