@@ -5,6 +5,8 @@ import { BaseCommand } from '../base-command.js';
 import { ConfigManager } from '../../config-manager.js';
 import { ActualClient } from '../../actual-client.js';
 import { RootConfig } from '../../types.js';
+import { ArgumentParser } from '../argparse.js';
+import { APIAccountEntity } from '@actual-app/api/models';
 
 const execAsync = promisify(exec);
 
@@ -18,48 +20,28 @@ export class PlotBalanceCommand extends BaseCommand {
     return 'Plot account balance history over time';
   }
 
-  private parseArgs(args: string[]): {
-    owner: string | null;
-    exclude: string | null;
-    ownerTotals: boolean;
-  } {
-    const result = {
-      owner: null as string | null,
-      exclude: null as string | null,
-      ownerTotals: false,
-    };
-
-    for (let i = 0; i < args.length; i++) {
-      const arg = args[i];
-
-      if ((arg === '--owner' || arg === '-o') && args[i + 1]) {
-        result.owner = args[i + 1];
-        i++;
-      } else if ((arg === '--exclude' || arg === '-x') && args[i + 1]) {
-        result.exclude = args[i + 1];
-        i++;
-      } else if (arg === '--owner-totals' || arg === '-t') {
-        result.ownerTotals = true;
-      }
-    }
-
-    return result;
+  setupArgs(parser: ArgumentParser): void {
+    parser.add_argument('-o', '--owner', { help: 'Filter accounts by owner (first word of account name)' });
+    parser.add_argument('-x', '--exclude', { help: 'Exclude accounts matching regex pattern' });
+    parser.add_argument('-t', '--owner-totals', { action: 'store_true', help: 'Include total balance per owner (dashed lines)' });
+    parser.add_argument('-F', '--acc-filter', { help: 'Filter accounts by JS expression, e.g. _.name.includes("savings")' });
   }
 
   async executeWithClients(
     configManager: ConfigManager,
     actualClient: ActualClient,
     config: RootConfig,
-    args: string[]
+    parsedArgs: { owner?: string; exclude?: string; ownerTotals: boolean, accFilter?: string }
   ): Promise<void> {
-    const { owner, exclude, ownerTotals } = this.parseArgs(args);
+    const { owner, exclude, ownerTotals, accFilter } = parsedArgs;
+    console.log(JSON.stringify({ owner, exclude, ownerTotals, accFilter }, null, 2));
 
     console.log('Fetching accounts...');
     let accounts = await actualClient.getAccounts();
 
     // Filter by owner (first word of account name)
     if (owner) {
-      accounts = accounts.filter((acc: any) => {
+      accounts = accounts.filter((acc) => {
         const firstWord = acc.name.split(/\s+/)[0];
         return firstWord === owner;
       });
@@ -70,8 +52,15 @@ export class PlotBalanceCommand extends BaseCommand {
     if (exclude) {
       const excludeRegex = new RegExp(exclude, 'i');
       const beforeCount = accounts.length;
-      accounts = accounts.filter((acc: any) => !excludeRegex.test(acc.name));
+      accounts = accounts.filter((acc) => !excludeRegex.test(acc.name));
       console.log(`Excluded pattern "${exclude}": ${beforeCount - accounts.length} accounts removed`);
+    }
+
+    if (accFilter) {
+      const accFilterFunc = eval(`(_) => (${accFilter})`) as (acc: APIAccountEntity) => boolean;
+      const beforeCount = accounts.length;
+      accounts = accounts.filter(accFilterFunc);
+      console.log(`Applied account filter "${accFilter}": ${beforeCount - accounts.length} accounts removed`);
     }
 
     if (accounts.length === 0) {
@@ -83,7 +72,7 @@ export class PlotBalanceCommand extends BaseCommand {
 
     // Collect balance history for each account
     const accountData: Array<{
-      account: any;
+      account: APIAccountEntity;
       history: BalancePoint[];
     }> = [];
 
@@ -92,7 +81,7 @@ export class PlotBalanceCommand extends BaseCommand {
       const transactions = await actualClient.getTransactions(account.id);
 
       // Sort transactions by date
-      transactions.sort((a: any, b: any) => a.date.localeCompare(b.date));
+      transactions.sort((a, b) => a.date.localeCompare(b.date));
 
       // Calculate running balance with one point per day in a single loop
       const history: BalancePoint[] = [];

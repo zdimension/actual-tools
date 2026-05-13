@@ -3,13 +3,18 @@ import { ConfigManager } from '../../config-manager.js';
 import { ActualClient } from '../../actual-client.js';
 import { RootConfig } from '../../types.js';
 import type { APICategoryEntity, APICategoryGroupEntity } from '@actual-app/core/server/api-models';
+import { ArgumentParser } from '../argparse.js';
 
 export class ListCategoriesCommand extends BaseCommand {
+  setupArgs(parser: ArgumentParser): void {
+    // no args
+  }
+
   getDescription(): string {
     return 'List all categories grouped by parent group';
   }
 
-  async executeWithClients(configManager: ConfigManager, actualClient: ActualClient, config: RootConfig, args: string[]): Promise<void> {
+  async executeWithClients(configManager: ConfigManager, actualClient: ActualClient, config: RootConfig, args: any): Promise<void> {
     // Get all categories and groups
     const categories = await actualClient.getCategories();
     const groupItems = await actualClient.getCategoryGroups();

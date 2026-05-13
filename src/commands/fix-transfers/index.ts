@@ -2,6 +2,7 @@ import { BaseCommand } from '../base-command.js';
 import { ConfigManager } from '../../config-manager.js';
 import { ActualClient } from '../../actual-client.js';
 import { RootConfig } from '../../types.js';
+import { ArgumentParser } from '../argparse.js';
 
 interface TransferIssue {
   transactionId: string;
@@ -17,11 +18,15 @@ interface TransferIssue {
 }
 
 export class FixTransfersCommand extends BaseCommand {
+  setupArgs(parser: ArgumentParser): void {
+    // no args
+  }
+
   getDescription(): string {
     return 'Find transfers between accounts of different owners';
   }
 
-  async executeWithClients(configManager: ConfigManager, actualClient: ActualClient, config: RootConfig, args: string[]): Promise<void> {
+  async executeWithClients(configManager: ConfigManager, actualClient: ActualClient, config: RootConfig, args: any): Promise<void> {
     // Get all accounts
     const accounts = await actualClient.getAccounts();
     const accountMap = new Map<string, any>();

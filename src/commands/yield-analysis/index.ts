@@ -4,6 +4,7 @@ import { ConfigManager } from '../../config-manager.js';
 import { ActualClient } from '../../actual-client.js';
 import { RootConfig } from '../../types.js';
 import { xirr, RateInterval, convertRate } from 'node-irr';
+import { ArgumentParser } from '../argparse.js';
 // node-irr is CJS — use createRequire for reliable named-export access
 /*const { xirr, convertRate, RateInterval } = createRequire(import.meta.url)('node-irr') as {
   xirr: (inputs: Array<{ amount: number; date: string | Date }>, options?: { estimate?: number }) => { days: number; rate: number };
@@ -203,6 +204,10 @@ function renderTable(headers: string[], rows: Row[], fmts: string[]): string {
 // ── Command ───────────────────────────────────────────────────────────────────
 
 export class YieldAnalysisCommand extends BaseCommand {
+  setupArgs(parser: ArgumentParser): void {
+    // no args
+  }
+
   getDescription(): string {
     return 'Compute IRR and yield analysis for investment and savings accounts';
   }

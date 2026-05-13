@@ -7,6 +7,7 @@ import { ActualClient } from '../../actual-client.js';
 import { RootConfig } from '../../types.js';
 import type { TransactionEntity } from '@actual-app/core/types/models';
 import { APIAccountEntity } from '@actual-app/api/models';
+import { ArgumentParser } from '../argparse.js';
 
 const execAsync = promisify(exec);
 
@@ -31,29 +32,36 @@ export class SankeyCommand extends BaseCommand {
     return 'Show account flow as a Sankey diagram (income → owner → expense)  [-o owner] [-g]';
   }
 
+  setupArgs(parser: ArgumentParser): void {
+    parser.add_argument('-o', '--owner', { help: 'Filter accounts by owner (first word of account name), comma-separated' });
+    parser.add_argument('-g', '--group', { action: 'store_true', help: 'Group transactions by category group instead of leaf category' });
+    parser.add_argument('-f', '--op-filter', { help: 'Filter transactions by JS expression, e.g. _.amount < 0 && _.category === "cat123"' });
+    parser.add_argument('-F', '--acc-filter', { help: 'Filter accounts by JS expression, e.g. _.name.includes("savings")' });
+  }
+
   async executeWithClients(
     _configManager: ConfigManager,
     actualClient: ActualClient,
     _config: RootConfig,
-    args: string[]
+    parsedArgs: { owner?: string; group?: boolean; opFilter?: string; accFilter?: string }
   ): Promise<void> {
     // Optional -o / --owner filter (comma-separated list of owner names)
-    const ownerFilterArg = this.getArg(args, ['-o', '--owner']);
+    const ownerFilterArg = parsedArgs.owner;
     const ownerFilter = ownerFilterArg
       ? new Set(ownerFilterArg.split(',').map(s => s.trim()))
       : null;
 
     // Optional -g / --group: group by category group instead of leaf category
-    const useGroups = args.includes('-g') || args.includes('--group');
+    const useGroups = parsedArgs.group;
 
     // Optional -f / --op-filter: filter op by expression
-    const opFilterArg = this.getArg(args, ['-f', '--op-filter']);
+    const opFilterArg = parsedArgs.opFilter;
     const opFilter = opFilterArg
       ? eval(`(_) => (${opFilterArg})`) as (op: TransactionEntity) => boolean
       : null;
 
     // Optional -F / --acc-filter: filter accounts by expression
-    const accFilterArg = this.getArg(args, ['-F', '--acc-filter']);
+    const accFilterArg = parsedArgs.accFilter;
     const accFilter = accFilterArg
       ? eval(`(_) => (${accFilterArg})`) as (acc: APIAccountEntity) => boolean
       : null;
@@ -187,13 +195,6 @@ export class SankeyCommand extends BaseCommand {
   }
 
   // ── Private helpers ─────────────────────────────────────────────────────────
-
-  private getArg(args: string[], flags: string[]): string | null {
-    for (let i = 0; i < args.length; i++) {
-      if (flags.includes(args[i]) && args[i + 1]) return args[i + 1];
-    }
-    return null;
-  }
 
   private async openInSankeymatic(nodes: SankeyNode[], links: SankeyLink[]): Promise<void> {
     // Build a label lookup: node id → display label

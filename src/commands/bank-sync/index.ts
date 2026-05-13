@@ -15,54 +15,35 @@ import { EdenredPlusConnector } from './connectors/edenredplus/index.js';
 import { TwoFactorRequiredError } from './connectors/two-factor-error.js';
 import { VendorAccount, ActualTransaction, VendorTransaction, RootConfig } from '../../types.js';
 import { Connector } from './connectors/connector.interface.js';
+import { ArgumentParser } from '../argparse.js';
+
+type Args = ({ dryRun: boolean; } & ({ connectors: string[] | null; } | { allManual: boolean })) | { summary: boolean };
 
 export class BankSyncCommand extends BaseCommand {
+  setupArgs(parser: ArgumentParser): void {
+    const summary = parser.add_mutually_exclusive_group();
+    summary.add_argument('-s', '--summary', { action: 'store_true', help: 'Show summary of connectors and exit (no syncing)' });
+    const sync = summary.add_argument_group();
+    sync.add_argument('-d', '--dry-run', { action: 'store_true', help: 'Run without making any changes to Actual (for testing)' });
+    const filter = sync.add_mutually_exclusive_group();
+    filter.add_argument('-c', '--connectors', { help: 'Comma-separated list of connectors to run (format: "connector" or "connector/account")', splitter: ',' });
+    filter.add_argument('-m', '--all-manual', { action: 'store_true', help: 'Run all connectors marked as manual (requiresManualRun: true)' });
+  }
+
   getDescription(): string {
     return 'Sync bank transactions from connectors to Actual Budget';
   }
 
-  private parseArgs(args: string[]): { dryRun: boolean; connectors: string[] | null; summary: boolean; allManual: boolean } {
-    const result = {
-      dryRun: false,
-      connectors: null as string[] | null,
-      summary: false,
-      allManual: false,
-    };
-
-    for (let i = 0; i < args.length; i++) {
-      const arg = args[i];
-
-      if (arg === '--dry-run' || arg === '-d') {
-        result.dryRun = true;
-      } else if (arg === '--connectors' || arg === '-c') {
-        const nextArg = args[i + 1];
-        if (nextArg && !nextArg.startsWith('-')) {
-          result.connectors = nextArg.split(',').map(c => c.trim());
-          i++; // Skip next arg since we consumed it
-        }
-      } else if (arg === '--summary' || arg === '-s') {
-        result.summary = true;
-      } else if (arg === '--all-manual' || arg === '-m') {
-        result.allManual = true;
-      }
-    }
-
-    return result;
-  }
-
-  async executeWithClients(configManager: ConfigManager, actualClient: ActualClient, config: RootConfig, args: string[]): Promise<void> {
-    const { dryRun, connectors, summary, allManual } = this.parseArgs(args);
-
-    if (allManual && connectors && connectors.length > 0) {
-      console.error('✗ Cannot use --all-manual (-m) together with --connectors (-c).');
-      process.exit(1);
-    }
-
-    if (summary) {
+  async executeWithClients(configManager: ConfigManager, actualClient: ActualClient, config: RootConfig, args: Args): Promise<void> {
+    if ('summary' in args) {
       await this.runSummary(config);
       return;
     }
-    await this.run(configManager, actualClient, config, dryRun, connectors, allManual);
+
+    await this.run(configManager, actualClient, config, args.dryRun, 
+      'connectors' in args 
+      ? args.connectors
+      : args.allManual ? 'manual' : 'auto');
   }
 
   private async runSummary(config: RootConfig): Promise<void> {
@@ -79,14 +60,14 @@ export class BankSyncCommand extends BaseCommand {
   }
 
 
-  private async run(configManager: ConfigManager, actualClient: ActualClient, config: RootConfig, dryRun: boolean = false, connectorFilter: string[] | null = null, allManual: boolean = false): Promise<void> {
+  private async run(configManager: ConfigManager, actualClient: ActualClient, config: RootConfig, dryRun: boolean = false, connectorFilter: string[] | 'manual' | 'auto' = 'auto'): Promise<void> {
     if (dryRun) {
       console.log('🔍 DRY RUN MODE - No changes will be made to Actual\n');
     }
 
     // Register any missing connectors that were explicitly selected with -c
     // Filter format: "connector" (all accounts) or "connector/account" (specific account)
-    if (connectorFilter && connectorFilter.length > 0) {
+    if (Array.isArray(connectorFilter)) { 
       for (const filterEntry of connectorFilter) {
         const [connectorName] = filterEntry.split('/');
 
@@ -166,7 +147,7 @@ export class BankSyncCommand extends BaseCommand {
 
     // Filter connectors if specified
     // Filter format: "connector" (all accounts) or "connector/account" (specific account)
-    if (connectorFilter && connectorFilter.length > 0) {
+    if (Array.isArray(connectorFilter)) {
       connectorsToProcess = connectorsToProcess.filter(([connectorName, accountName]) => {
         return connectorFilter.some(filter => {
           if (filter.includes('/')) {
@@ -184,7 +165,7 @@ export class BankSyncCommand extends BaseCommand {
         process.exit(1);
       }
       console.log(`ℹ Running only selected connectors: ${connectorsToProcess.map(([cn, an]) => `${cn}/${an}`).join(', ')}\n`);
-    } else if (allManual) {
+    } else if (connectorFilter === 'manual') {
       connectorsToProcess = connectorsToProcess.filter(([, , connectorConfig]) => connectorConfig.requiresManualRun);
       if (connectorsToProcess.length === 0) {
         console.error('✗ No connectors are marked as manual (requiresManualRun: true).');
@@ -202,7 +183,7 @@ export class BankSyncCommand extends BaseCommand {
       console.log('='.repeat(60));
 
       // Determine if this is a manual run (via -c or -m flags)
-      const isManuallyRun = !!(connectorFilter || allManual);
+      const isManuallyRun = connectorFilter !== 'auto';
 
       if (connectorConfig.disabled) {
         if (isManuallyRun) {
@@ -219,7 +200,7 @@ export class BankSyncCommand extends BaseCommand {
       }
 
       // Skip connectors requiring manual run unless explicitly selected
-      if (connectorConfig.requiresManualRun && !connectorFilter && !allManual) {
+      if (connectorConfig.requiresManualRun && !(connectorFilter === 'manual' || (Array.isArray(connectorFilter) && connectorFilter.some(filter => filter === connectorName || filter === `${connectorName}/${accountName}`)))) {
         console.log(`⚠ Skipping connector ${label} (requires manual run - use -c ${connectorName} to run)`);
         continue;
       }

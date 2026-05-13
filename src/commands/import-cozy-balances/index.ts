@@ -3,6 +3,7 @@ import { ConfigManager } from '../../config-manager.js';
 import { ActualClient } from '../../actual-client.js';
 import { RootConfig, ActualTransaction } from '../../types.js';
 import { utils } from '@actual-app/api';
+import { ArgumentParser } from '../argparse.js';
 
 interface CozyDoc {
   _id: string;
@@ -21,6 +22,12 @@ export class ImportCozyBalancesCommand extends BaseCommand {
   private baseUrl: string = '';
   private token: string = '';
 
+  setupArgs(parser: ArgumentParser): void {
+    parser.add_argument('--base-url', { help: 'Base URL of the Cozy instance (can also be set via BASE_URL environment variable)' });
+    parser.add_argument('--token', { help: 'API token for Cozy authentication (can also be set via TOKEN environment variable)' });
+    parser.add_argument('accountIds', { nargs: '*', help: 'List of Actual account IDs to import balances for' });
+  }
+
   getDescription(): string {
     return 'Import balance history from Cozy for specified Actual accounts';
   }
@@ -29,11 +36,8 @@ export class ImportCozyBalancesCommand extends BaseCommand {
     configManager: ConfigManager,
     actualClient: ActualClient,
     config: RootConfig,
-    args: string[]
+    parsedArgs: { baseUrl?: string; token?: string; accountIds: string[] }
   ): Promise<void> {
-    // Parse CLI parameters
-    const parsedArgs = this.parseArgs(args);
-    
     // Get base URL and token from CLI or environment variables
     this.baseUrl = parsedArgs.baseUrl || process.env.BASE_URL || '';
     this.token = parsedArgs.token || process.env.TOKEN || '';
@@ -169,28 +173,6 @@ export class ImportCozyBalancesCommand extends BaseCommand {
     const dt = new Date(date);
     dt.setDate(dt.getDate() + days);
     return dt.toISOString().slice(0, 10);
-  }
-
-  private parseArgs(args: string[]): { baseUrl?: string; token?: string; accountIds: string[] } {
-    const result: { baseUrl?: string; token?: string; accountIds: string[] } = {
-      accountIds: [],
-    };
-
-    for (let i = 0; i < args.length; i++) {
-      const arg = args[i];
-      
-      if (arg === '--base-url' && i + 1 < args.length) {
-        result.baseUrl = args[i + 1];
-        i++; // Skip next arg
-      } else if (arg === '--token' && i + 1 < args.length) {
-        result.token = args[i + 1];
-        i++; // Skip next arg
-      } else if (!arg.startsWith('--')) {
-        result.accountIds.push(arg);
-      }
-    }
-
-    return result;
   }
 
   private async getCozyDocs(doctype: string): Promise<CozyDoc[]> {
