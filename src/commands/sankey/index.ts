@@ -35,8 +35,8 @@ export class SankeyCommand extends BaseCommand {
   setupArgs(parser: ArgumentParser): void {
     parser.add_argument('-o', '--owner', { help: 'Filter accounts by owner (first word of account name), comma-separated' });
     parser.add_argument('-g', '--group', { action: 'store_true', help: 'Group transactions by category group instead of leaf category' });
-    parser.add_argument('-f', '--op-filter', { help: 'Filter transactions by JS expression, e.g. _.amount < 0 && _.category === "cat123"' });
-    parser.add_argument('-F', '--acc-filter', { help: 'Filter accounts by JS expression, e.g. _.name.includes("savings")' });
+    parser.add_argument('-f', '--op-filter', { help: 'Filter transactions by JS expression, e.g. _.date >= \'2024-01-01\'' });
+    parser.add_argument('-F', '--acc-filter', { help: 'Filter accounts by JS expression, e.g. _.name.includes(\'savings\')' });
   }
 
   async executeWithClients(
@@ -112,9 +112,10 @@ export class SankeyCommand extends BaseCommand {
       ];
 
       for (const tx of txs) {
-        if (opFilter && !opFilter(tx)) continue;
-        if (tx.transfer_id) continue;  // skip transfers (they clutter the diagram and don't represent real inflow/outflow)
+        if (tx.transfer_id) continue;  // skip transfers
         if (!tx.category) tx.category = 'N/A';
+        (tx as any).category_name = catName.get(tx.category) ?? tx.category;
+        if (opFilter && !opFilter(tx)) continue;
 
         const amountEur = (tx.amount ?? 0) / 100;
 
