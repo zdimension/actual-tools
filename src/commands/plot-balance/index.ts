@@ -76,6 +76,10 @@ export class PlotBalanceCommand extends BaseCommand {
       history: BalancePoint[];
     }> = [];
 
+    // Generate plot data
+    const traces: any[] = [];
+    const shapes: any[] = [];
+
     for (const account of accounts) {
       console.log(`  Processing: ${account.name}`);
       const transactions = await actualClient.getTransactions(account.id);
@@ -99,6 +103,24 @@ export class PlotBalanceCommand extends BaseCommand {
             balance: runningBalance / 100, // Convert cents to dollars/euros
           });
         }
+
+        // add vlines to mark investments/withdrawals
+        if (tx.transfer_id) {
+          shapes.push({
+            type: 'line',
+            x0: tx.date,
+            x1: tx.date,
+            y0: 0,
+            y1: runningBalance / 100,
+            line: {
+              color: tx.amount > 0 ? 'green' : 'red',
+              width: 1,
+              dash: 'dot',
+            },
+            legendgroup: account.id,
+            showlegend: true
+          });
+        }
       }
 
       // Add balance_current at end with current timestamp (for non-closed accounts)
@@ -113,9 +135,6 @@ export class PlotBalanceCommand extends BaseCommand {
       accountData.push({ account, history });
     }
 
-    // Generate plot data
-    const traces: any[] = [];
-
     // Individual account traces
     for (const { account, history } of accountData) {
       if (history.length === 0) continue;
@@ -127,6 +146,7 @@ export class PlotBalanceCommand extends BaseCommand {
         mode: 'lines',
         line: { shape: 'hv' },
         type: 'scatter',
+        legendgroup: account.id
       });
     }
 
@@ -189,7 +209,7 @@ export class PlotBalanceCommand extends BaseCommand {
     }
 
     // Generate HTML with Plotly
-    const html = this.generateHtml(traces, owner, exclude, ownerTotals);
+    const html = this.generateHtml(traces, owner, exclude, ownerTotals, shapes);
 
     // Serve HTML from a one-shot HTTP server and open in browser
     await this.serveAndOpen(html);
@@ -236,7 +256,7 @@ export class PlotBalanceCommand extends BaseCommand {
     }
   }
 
-  private generateHtml(traces: any[], owner: string | null, exclude: string | null, ownerTotals: boolean): string {
+  private generateHtml(traces: any[], owner: string | null, exclude: string | null, ownerTotals: boolean, shapes: any[]): string {
     const title = this.buildTitle(owner, exclude, ownerTotals);
 
     return `<!DOCTYPE html>
@@ -280,7 +300,8 @@ export class PlotBalanceCommand extends BaseCommand {
         y: 1,
         xanchor: 'left',
         yanchor: 'top'
-      }
+      },
+      shapes: ${JSON.stringify(shapes, null, 2)}
     };
     
     const config = {
