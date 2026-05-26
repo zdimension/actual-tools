@@ -1,14 +1,10 @@
-import * as http from 'http';
-import { exec } from 'child_process';
-import { promisify } from 'util';
 import { BaseCommand } from '../base-command.js';
 import { ConfigManager } from '../../config-manager.js';
 import { ActualClient } from '../../actual-client.js';
 import { RootConfig } from '../../types.js';
 import { ArgumentParser } from '../argparse.js';
 import { APIAccountEntity } from '@actual-app/api/models';
-
-const execAsync = promisify(exec);
+import { openPlot } from '../../plotly.js';
 
 interface BalancePoint {
   date: string;
@@ -208,82 +204,11 @@ export class PlotBalanceCommand extends BaseCommand {
       }
     }
 
-    // Generate HTML with Plotly
-    const html = this.generateHtml(traces, owner, exclude, ownerTotals, shapes);
-
-    // Serve HTML from a one-shot HTTP server and open in browser
-    await this.serveAndOpen(html);
-  }
-
-  private async serveAndOpen(html: string): Promise<void> {
-    await new Promise<void>((resolve, reject) => {
-      const server = http.createServer((req, res) => {
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end(html);
-        // Shut down after the page is served — give the browser a moment to
-        // fetch any sub-resources before closing (Plotly is CDN-loaded so
-        // there are no local sub-resources, but a short grace period is safe).
-        setTimeout(() => server.close(() => resolve()), 500);
-      });
-
-      server.on('error', reject);
-
-      // Port 0 → OS picks a free port
-      server.listen(0, '127.0.0.1', async () => {
-        const addr = server.address() as { port: number };
-        const url = `http://127.0.0.1:${addr.port}`;
-        console.log(`\n✓ Serving plot at ${url}`);
-        console.log('  Opening in browser…');
-        try {
-          await this.openInBrowser(url);
-        } catch (err) {
-          console.error(`  ⚠ Could not open browser automatically: ${err}`);
-          console.log(`  Please open ${url} manually.`);
-        }
-      });
-    });
-  }
-
-  private async openInBrowser(url: string): Promise<void> {
-    const platform = process.platform;
-
-    if (platform === 'win32') {
-      await execAsync(`start "" "${url}"`);
-    } else if (platform === 'darwin') {
-      await execAsync(`open "${url}"`);
-    } else {
-      await execAsync(`xdg-open "${url}"`);
-    }
-  }
-
-  private generateHtml(traces: any[], owner: string | null, exclude: string | null, ownerTotals: boolean, shapes: any[]): string {
+    // Build layout + config and open plot in browser using shared helper
     const title = this.buildTitle(owner, exclude, ownerTotals);
 
-    return `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>Account Balance History</title>
-  <script src="https://cdn.plot.ly/plotly-3.3.0.min.js"></script>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      margin: 20px;
-    }
-    #plot {
-      width: 100%;
-      height: 800px;
-    }
-  </style>
-</head>
-<body>
-  <h1>Account Balance History</h1>
-  <div id="plot"></div>
-  <script>
-    const data = ${JSON.stringify(traces, null, 2)};
-    
     const layout = {
-      title: '${title}',
+      title,
       xaxis: {
         title: 'Date',
         type: 'date',
@@ -301,20 +226,17 @@ export class PlotBalanceCommand extends BaseCommand {
         xanchor: 'left',
         yanchor: 'top'
       },
-      shapes: ${JSON.stringify(shapes, null, 2)}
+      shapes
     };
-    
-    const config = {
+
+    await openPlot(traces, layout, {
       responsive: true,
       displayModeBar: true,
       displaylogo: false
-    };
-    
-    Plotly.newPlot('plot', data, layout, config);
-  </script>
-</body>
-</html>`;
+    });
   }
+
+  // HTML generation and browser-open logic moved to src/plotly.ts
 
   private buildTitle(owner: string | null, exclude: string | null, ownerTotals: boolean): string {
     const parts: string[] = ['Account Balances'];
