@@ -5,6 +5,7 @@ import { RootConfig } from '../../types.js';
 import { ArgumentParser } from '../argparse.js';
 import { APIAccountEntity } from '@actual-app/api/models';
 import { openPlot } from '../../plotly.js';
+import { utils } from '@actual-app/api';
 
 interface BalancePoint {
   date: string;
@@ -80,6 +81,8 @@ export class PlotBalanceCommand extends BaseCommand {
       console.log(`  Processing: ${account.name}`);
       const transactions = await actualClient.getTransactions(account.id);
 
+      const isInvestment = config.balanceUpdate.categoryId && transactions.some(tx => tx.category === config.balanceUpdate.categoryId);
+
       // Sort transactions by date
       transactions.sort((a, b) => a.date.localeCompare(b.date));
 
@@ -101,7 +104,7 @@ export class PlotBalanceCommand extends BaseCommand {
         }
 
         // add vlines to mark investments/withdrawals
-        if (tx.transfer_id) {
+        if (isInvestment && tx.transfer_id) {
           shapes.push({
             type: 'line',
             x0: tx.date,
@@ -113,8 +116,9 @@ export class PlotBalanceCommand extends BaseCommand {
               width: 1,
               dash: 'dot',
             },
+            name: `${tx.date}: ${utils.integerToAmount(tx.amount || 0).toFixed(2)}`,
             legendgroup: account.id,
-            showlegend: true
+            showlegend: false,
           });
         }
       }
@@ -224,7 +228,8 @@ export class PlotBalanceCommand extends BaseCommand {
         x: 1.02,
         y: 1,
         xanchor: 'left',
-        yanchor: 'top'
+        yanchor: 'top',
+        tracegroupgap: 0,
       },
       shapes
     };

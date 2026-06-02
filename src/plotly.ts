@@ -64,7 +64,7 @@ function generateHtml(data: any[], layout: any, config: any): string {
 <head>
   <meta charset="utf-8">
   <title>${escapeHtml(title)}</title>
-  <script src="https://cdn.plot.ly/plotly-3.3.0.min.js"></script>
+  <script src="https://cdn.plot.ly/plotly-3.6.0.min.js"></script>
   <style>
     body { font-family: Arial, sans-serif; margin: 20px; }
     #plot { width: 100%; height: 800px; }
