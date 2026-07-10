@@ -300,7 +300,7 @@ export class AmundiConnector implements Connector {
           vendorId: op.idInstruction,
           vendorAccountId: fullId,
           amount: op.montantNet,
-          date: op.dateComptabilisation,
+          date: op.dateComptabilisation.split('T')[0],
           label: op.libelleCommunication,
           originalLabel: op.libelleCommunication,
         }));
