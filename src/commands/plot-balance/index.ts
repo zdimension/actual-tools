@@ -12,6 +12,11 @@ interface BalancePoint {
   balance: number;
 }
 
+interface AccountBalanceData {
+  account: APIAccountEntity;
+  history: BalancePoint[];
+}
+
 export class PlotBalanceCommand extends BaseCommand {
   getDescription(): string {
     return 'Plot account balance history over time';
@@ -21,6 +26,7 @@ export class PlotBalanceCommand extends BaseCommand {
     parser.add_argument('-o', '--owner', { help: 'Filter accounts by owner (first word of account name)' });
     parser.add_argument('-x', '--exclude', { help: 'Exclude accounts matching regex pattern' });
     parser.add_argument('-t', '--owner-totals', { action: 'store_true', help: 'Include total balance per owner (dashed lines)' });
+    parser.add_argument('-T', '--grand-total', { action: 'store_true', help: 'Include grand total balance across all plotted accounts' });
     parser.add_argument('-F', '--acc-filter', { help: 'Filter accounts by JS expression, e.g. _.name.includes("savings")' });
   }
 
@@ -28,10 +34,10 @@ export class PlotBalanceCommand extends BaseCommand {
     configManager: ConfigManager,
     actualClient: ActualClient,
     config: RootConfig,
-    parsedArgs: { owner?: string; exclude?: string; ownerTotals: boolean, accFilter?: string }
+    parsedArgs: { owner?: string; exclude?: string; ownerTotals: boolean; grandTotal: boolean; accFilter?: string }
   ): Promise<void> {
-    const { owner, exclude, ownerTotals, accFilter } = parsedArgs;
-    console.log(JSON.stringify({ owner, exclude, ownerTotals, accFilter }, null, 2));
+    const { owner, exclude, ownerTotals, grandTotal, accFilter } = parsedArgs;
+    console.log(JSON.stringify({ owner, exclude, ownerTotals, grandTotal, accFilter }, null, 2));
 
     console.log('Fetching accounts...');
     let accounts = await actualClient.getAccounts();
@@ -68,10 +74,7 @@ export class PlotBalanceCommand extends BaseCommand {
     console.log(`Processing ${accounts.length} accounts...`);
 
     // Collect balance history for each account
-    const accountData: Array<{
-      account: APIAccountEntity;
-      history: BalancePoint[];
-    }> = [];
+    const accountData: AccountBalanceData[] = [];
 
     // Generate plot data
     const traces: any[] = [];
@@ -165,37 +168,7 @@ export class PlotBalanceCommand extends BaseCommand {
 
       // Calculate owner totals
       for (const [ownerName, ownerAccounts] of ownerGroups) {
-        // Collect all unique dates
-        const allDates = new Set<string>();
-        for (const { history } of ownerAccounts) {
-          for (const point of history) {
-            allDates.add(point.date);
-          }
-        }
-
-        const sortedDates = Array.from(allDates).sort();
-
-        // Calculate total balance at each date
-        const ownerHistory: BalancePoint[] = [];
-
-        for (const date of sortedDates) {
-          let total = 0;
-
-          for (const { history } of ownerAccounts) {
-            // Find the balance at or before this date
-            let balance = 0;
-            for (const point of history) {
-              if (point.date <= date) {
-                balance = point.balance;
-              } else {
-                break;
-              }
-            }
-            total += balance;
-          }
-
-          ownerHistory.push({ date, balance: total });
-        }
+        const ownerHistory = this.buildTotalHistory(ownerAccounts);
 
         traces.push({
           name: `${ownerName} (Total)`,
@@ -208,8 +181,21 @@ export class PlotBalanceCommand extends BaseCommand {
       }
     }
 
+    if (grandTotal && accountData.length > 0) {
+      const grandHistory = this.buildTotalHistory(accountData);
+
+      traces.push({
+        name: 'Grand Total',
+        x: grandHistory.map(p => p.date),
+        y: grandHistory.map(p => p.balance),
+        mode: 'lines',
+        line: { shape: 'hv', dash: 'dash', width: 3 },
+        type: 'scatter',
+      });
+    }
+
     // Build layout + config and open plot in browser using shared helper
-    const title = this.buildTitle(owner, exclude, ownerTotals);
+    const title = this.buildTitle(owner, exclude, ownerTotals, grandTotal);
 
     const layout = {
       title,
@@ -243,7 +229,35 @@ export class PlotBalanceCommand extends BaseCommand {
 
   // HTML generation and browser-open logic moved to src/plotly.ts
 
-  private buildTitle(owner: string | null, exclude: string | null, ownerTotals: boolean): string {
+  private buildTotalHistory(accountData: AccountBalanceData[]): BalancePoint[] {
+    const allDates = new Set<string>();
+    for (const { history } of accountData) {
+      for (const point of history) {
+        allDates.add(point.date);
+      }
+    }
+
+    return Array.from(allDates).sort().map(date => ({
+      date,
+      balance: accountData.reduce((total, { history }) => total + this.getBalanceAtDate(history, date), 0),
+    }));
+  }
+
+  private getBalanceAtDate(history: BalancePoint[], date: string): number {
+    let balance = 0;
+
+    for (const point of history) {
+      if (point.date <= date) {
+        balance = point.balance;
+      } else {
+        break;
+      }
+    }
+
+    return balance;
+  }
+
+  private buildTitle(owner: string | null, exclude: string | null, ownerTotals: boolean, grandTotal: boolean): string {
     const parts: string[] = ['Account Balances'];
 
     if (owner) {
@@ -256,6 +270,10 @@ export class PlotBalanceCommand extends BaseCommand {
 
     if (ownerTotals) {
       parts.push('with Owner Totals');
+    }
+
+    if (grandTotal) {
+      parts.push('with Grand Total');
     }
 
     return parts.join(' - ');
